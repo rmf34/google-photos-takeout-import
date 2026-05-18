@@ -208,21 +208,45 @@ def build_exiftool_entry(media_path: Path, metadata: dict) -> Optional[dict]:
 def run_exiftool_batch(entries: list[dict]) -> tuple[int, int]:
     if not entries:
         return 0, 0
+
+    # Chunk to stay under ARG_MAX — each path is at most ~200 chars;
+    # stay safely below the 3.2 MB limit with 10k files per call.
+    CHUNK = 10_000
+    if len(entries) > CHUNK:
+        total_ok = total_err = 0
+        for start in range(0, len(entries), CHUNK):
+            ok, err = run_exiftool_batch(entries[start : start + CHUNK])
+            total_ok += ok
+            total_err += err
+        return total_ok, total_err
+
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".json", delete=False, encoding="utf-8"
     ) as f:
         json.dump(entries, f)
         tmp_path = f.name
     try:
+        files = [e["SourceFile"] for e in entries]
         result = subprocess.run(
-            ["exiftool", f"-json={tmp_path}", "-overwrite_original", "-m", "-q"],
+            ["exiftool", f"-json={tmp_path}", "-overwrite_original", "-m"] + files,
             capture_output=True,
             text=True,
         )
-        stderr_errors = result.stderr.count("Error")
-        stdout_errors = result.stdout.count("Error")
-        errors = stderr_errors + stdout_errors
-        return max(0, len(entries) - errors), errors
+        if result.returncode != 0:
+            return 0, len(entries)
+        # Parse "N image files updated" from stderr for accurate success count
+        updated = 0
+        for line in result.stderr.splitlines():
+            if "image files updated" in line or "image files unchanged" in line:
+                try:
+                    updated += int(line.strip().split()[0])
+                except ValueError:
+                    pass
+        # Fall back to entry count minus errors if parsing fails
+        if updated == 0 and result.returncode == 0:
+            updated = len(entries)
+        errors = len(entries) - updated
+        return updated, max(0, errors)
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
