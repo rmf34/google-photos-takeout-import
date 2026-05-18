@@ -25,31 +25,47 @@ Code lives in `~/portainer/google-photos-takeout-import/`.
 ## Setup
 
 ```bash
-# Install exiftool
+# 1. Install exiftool (system package)
 sudo apt-get install -y libimage-exiftool-perl
 
-# Create .venv and install dependencies
+# 2. Create virtual environment
 python3 -m venv .venv
-.venv/bin/pip install timezonefinder
+source .venv/bin/activate        # re-run this at the start of each shell session
 
-# Activate (optional, or just prefix commands with .venv/bin/)
-source .venv/bin/activate
+# 3. Install Python dependencies
+pip install timezonefinder       # required: DST-aware timezone lookup from GPS coords
+pip install pytest ruff          # optional: test runner and linter
+```
+
+To confirm everything is ready:
+
+```bash
+exiftool -ver                    # should print a version number (e.g. 12.76)
+python -c "import timezonefinder; print('ok')"
 ```
 
 ## Usage
 
+Activate the venv first if you haven't already:
+
+```bash
+source .venv/bin/activate
+```
+
+Then run each step in order:
+
 ```bash
 # Step 1: extract all ZIPs (deletes each ZIP after successful extraction)
-python3 extract_and_stage.py
+python extract_and_stage.py
 
 # Step 2: split 'Photos from YEAR' into monthly sub-albums (required before fix_metadata)
-python3 split_year_albums.py
+python split_year_albums.py
 
 # Step 3: sanity checks (exits 1 on failure — fix before proceeding)
-.venv/bin/python precheck.py
+python precheck.py
 
 # Step 4: write EXIF metadata from JSON sidecars into all media files
-.venv/bin/python fix_metadata.py
+python fix_metadata.py
 ```
 
 Steps 1 and 4 are safe to re-run — already-extracted files are skipped, and exiftool is idempotent. Step 2 is also re-runnable: files already in a monthly folder won't be moved again (collision detection skips them).
