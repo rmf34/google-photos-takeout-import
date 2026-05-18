@@ -93,6 +93,9 @@ _DUPE_RE = re.compile(r"^(.*?)(\(\d+\))(\.[^.]+)$")
 # Timezone finder — loaded once if available
 _tf = None
 
+# Optional error log file handle — set by main() to capture exiftool error lines
+_error_log = None
+
 
 def _get_tz_finder():
     global _tf
@@ -326,6 +329,8 @@ def run_exiftool_batch(entries: list[dict]) -> tuple[int, int]:
                     updated += int(line.strip().split()[0])
                 except ValueError:
                     pass
+            elif line.startswith("Error:") and _error_log is not None:
+                _error_log.write(line + "\n")
         # Fall back to entry count minus errors if parsing fails
         if updated == 0 and result.returncode == 0:
             updated = len(entries)
@@ -411,6 +416,10 @@ def main():
     stats = {"ok": 0, "no_sidecar": 0, "bad_sidecar": 0, "exiftool_error": 0}
     prog = Progress(len(all_files))
 
+    global _error_log
+    error_log_path = SCRIPT_DIR / "fix_metadata_errors.log"
+    _error_log = open(error_log_path, "w", encoding="utf-8")
+
     # Process album by album so exiftool batches stay manageable
     albums: dict[Path, list[Path]] = {}
     for f in all_files:
@@ -446,6 +455,8 @@ def main():
         stats["exiftool_error"] += err
 
     prog.finish()
+    _error_log.close()
+    _error_log = None
 
     total = len(all_files)
     print(f"{'=' * 55}")
@@ -454,6 +465,22 @@ def main():
     print(f"No sidecar found     : {stats['no_sidecar']:,}")
     print(f"Bad/empty sidecar    : {stats['bad_sidecar']:,}")
     print(f"Exiftool errors      : {stats['exiftool_error']:,}")
+
+    if stats["exiftool_error"] > 0:
+        print(f"\nError details: {error_log_path}")
+        # Summarise unique error prefixes so the user can see what's failing
+        from collections import Counter
+
+        with open(error_log_path, encoding="utf-8") as lf:
+            lines = lf.readlines()
+        # Bucket by error type (first ~60 chars before the path)
+        buckets: Counter = Counter()
+        for line in lines:
+            msg = line.split(" - ")[0].strip()
+            buckets[msg] += 1
+        print("  Error breakdown:")
+        for msg, count in buckets.most_common(10):
+            print(f"    {count:6,}  {msg}")
 
     if stats["no_sidecar"] > 0:
         print(f"\nNote: {stats['no_sidecar']:,} files had no sidecar — they keep whatever")
