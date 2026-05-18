@@ -6,7 +6,7 @@ Migrate a Google Takeout photo archive to an existing Google Photos account.
 
 1. **`extract_and_stage.py`** — Extracts all Takeout ZIP files into a staging directory, merging albums split across multiple ZIPs. Includes `Photos from YEAR` auto-albums (which hold any photo not in a named album). Deletes each ZIP after a successful count-verified extraction.
 
-2. **`split_year_albums.py`** — Splits large `Photos from YEAR` directories into `Photos from YYYY-MM` monthly sub-albums based on each photo's `photoTakenTime` sidecar timestamp. Handles Google's duplicate naming quirk (`STEM(N).EXT` → `STEM.EXT.supplemental-metadata(N).json`). Photos with no usable timestamp go into `Photos from YYYY-unknown`. Supports `--dry-run`.
+2. **`split_year_albums.py`** — `Photos from YEAR` directories can contain up to 58,000 files. Passing that many paths to exiftool in one call exceeds the kernel's `ARG_MAX` limit (~3.2 MB on this system) and crashes with `Argument list too long`. This script splits each year directory into `Photos from YYYY-MM` monthly sub-albums (≈2,000–5,000 files each) based on each photo's `photoTakenTime` sidecar timestamp. Handles Google's duplicate naming quirk (`STEM(N).EXT` → `STEM.EXT.supplemental-metadata(N).json`). Photos with no usable timestamp go into `Photos from YYYY-unknown`. Supports `--dry-run`.
 
 3. **`precheck.py`** — Sanity checks to run before touching EXIF: verifies exiftool is installed, staged directory exists, sidecar coverage ≥ 90%, ≥ 5 GB free, and runs a sample pipeline test on a real photo with GPS.
 
