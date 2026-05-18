@@ -5,3 +5,4 @@ __pycache__/
 *.json.tmp
 .pytest_cache/
 .ruff_cache/
+fix_metadata_errors.log
