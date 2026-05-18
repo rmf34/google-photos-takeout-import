@@ -147,6 +147,8 @@ Video containers use QuickTime-style metadata atoms:
 
 **What is never touched:** Camera make, model, lens, aperture, shutter speed, ISO, focal length, and all other camera EXIF tags already in the file are left completely untouched. Only the fields above are written.
 
+**No backup files are created.** exiftool normally writes a `filename_original` backup alongside each file it modifies. This script passes `-overwrite_original` to suppress that, because a large photo library would temporarily require double the disk space. The original Takeout ZIPs (on the flash drive) are the backup.
+
 ---
 
 ## Edge cases handled
