@@ -108,11 +108,14 @@ def find_sidecars(media_path: Path, json_set: set[Path]) -> list[Path]:
             sidecars.append(c)
             seen.add(c)
 
-    prefix = name[: min(len(name), 40)]
-    for c in json_set:
-        if c.name.startswith(prefix) and c not in seen:
-            sidecars.append(c)
-            seen.add(c)
+    # O(n) fuzzy scan only when direct + dupe matching found nothing.
+    # Skipping this for matched files eliminates O(n²) on large albums.
+    if not sidecars:
+        prefix = name[: min(len(name), 40)]
+        for c in json_set:
+            if c.name.startswith(prefix) and c not in seen:
+                sidecars.append(c)
+                seen.add(c)
 
     return sidecars
 
@@ -133,7 +136,7 @@ def safe_move(src: Path, dst_dir: Path) -> bool:
 def split_album(album_dir: Path, year: str) -> dict:
     stats = {"total": 0, "moved": 0, "no_month": 0, "collision": 0}
 
-    # Precompute directory listing once — avoids O(n²) scans for large albums
+    # Precompute directory listing once — avoids repeated iterdir() calls
     all_entries = list(album_dir.iterdir())
     json_set = {f for f in all_entries if f.is_file() and f.suffix == ".json"}
     media_files = sorted(f for f in all_entries if f.is_file() and f.suffix.lower() in MEDIA_EXTS)
@@ -142,15 +145,18 @@ def split_album(album_dir: Path, year: str) -> dict:
     if not media_files:
         return stats
 
+    # Pre-parse every sidecar's month upfront — eliminates per-file JSON reads
+    # in the main loop (one sequential pass over all JSONs instead of random access).
+    sidecar_months: dict[Path, str | None] = {sc: _parse_month(sc) for sc in json_set}
+
     start = time.monotonic()
     last_print = 0.0
 
     for i, media in enumerate(media_files):
-        month = get_month(media, json_set)
+        sidecars = find_sidecars(media, json_set)
+        month = sidecar_months[sidecars[0]] if sidecars else None
         subdir = f"Photos from {month}" if month else f"Photos from {year}-unknown"
         dst_dir = PHOTOS_DIR / subdir
-
-        sidecars = find_sidecars(media, json_set)
 
         if not safe_move(media, dst_dir):
             stats["collision"] += 1
