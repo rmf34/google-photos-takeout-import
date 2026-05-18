@@ -140,6 +140,8 @@ def parse_sidecar(json_path: Path) -> dict:
     if ts_str:
         try:
             ts = int(ts_str)
+            if ts <= 0:
+                raise ValueError("epoch or negative timestamp — treat as missing")
             gps = result.get("gps", {})
             lat = gps.get("lat", 0) * (1 if gps.get("lat_ref") == "N" else -1)
             lon = gps.get("lon", 0) * (1 if gps.get("lon_ref") == "E" else -1)

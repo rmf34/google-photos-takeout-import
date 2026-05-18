@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
 Extract all Google Takeout ZIP files to the staging directory.
-- Skips 'Photos from YEAR' albums (auto-generated year buckets)
+- Extracts ALL content including 'Photos from YEAR' albums
 - Merges albums split across multiple ZIPs (won't overwrite existing files)
 - Deletes each ZIP after successful extraction
 - Shows live progress on a single updating line
+
+Note: 'Photos from YEAR' folders are extracted but will not become albums
+when uploading — those photos go into the library unsorted, which is correct
+since they weren't in any named album originally.
 """
 import re
 import shutil
@@ -17,18 +21,24 @@ DATA_DIR = Path("~/photos")
 RAW_DIR = DATA_DIR / "raw_from_drive"
 STAGE_DIR = DATA_DIR / "staged"
 
-SKIP_ALBUM = re.compile(r"^Photos from \d{4}$")
+YEAR_ALBUM = re.compile(r"^Photos from \d{4}$")
 
 
-def is_skipped(zip_member: str) -> bool:
+def album_name(zip_member: str) -> str | None:
+    """Return the album folder name for a zip path, or None if not in an album."""
     parts = zip_member.split("/")
     try:
         gp_idx = next(i for i, p in enumerate(parts) if p == "Google Photos")
         if gp_idx + 1 < len(parts):
-            return bool(SKIP_ALBUM.match(parts[gp_idx + 1]))
+            return parts[gp_idx + 1]
     except StopIteration:
         pass
-    return False
+    return None
+
+
+def is_year_album(zip_member: str) -> bool:
+    name = album_name(zip_member)
+    return name is not None and bool(YEAR_ALBUM.match(name))
 
 
 class Progress:
@@ -58,24 +68,21 @@ class Progress:
         )
 
 
-def extract_zip(zip_path: Path, zip_num: int, zip_total: int) -> tuple[int, int]:
-    extracted = skipped = 0
+def extract_zip(zip_path: Path, zip_num: int, zip_total: int) -> tuple[int, int, int]:
+    """Extract one ZIP. Returns (extracted, already_existed, total_files)."""
+    extracted = already_existed = 0
     prog = Progress(f"[{zip_num}/{zip_total}] {zip_path.name}")
 
     with zipfile.ZipFile(zip_path, "r") as zf:
         members = [m for m in zf.infolist() if not m.filename.endswith("/")]
+        total = len(members)
 
         for member in members:
             name = member.filename
-
-            if is_skipped(name):
-                skipped += 1
-                prog.update(suffix="(skipping year albums)")
-                continue
-
             target = STAGE_DIR / name
+
             if target.exists():
-                skipped += 1
+                already_existed += 1
                 prog.update()
                 continue
 
@@ -86,8 +93,8 @@ def extract_zip(zip_path: Path, zip_num: int, zip_total: int) -> tuple[int, int]
             extracted += 1
             prog.update(suffix=Path(name).parent.name[:40])
 
-    prog.done(f"extracted={extracted} skipped={skipped}")
-    return extracted, skipped
+    prog.done(f"extracted={extracted} already_existed={already_existed} total={total}")
+    return extracted, already_existed, total
 
 
 def main():
@@ -103,14 +110,22 @@ def main():
     total_extracted = total_skipped = 0
     overall_start = time.monotonic()
 
+    kept = []
+
     for i, zip_path in enumerate(zips, 1):
         try:
-            extracted, skipped = extract_zip(zip_path, i, len(zips))
+            extracted, already_existed, total = extract_zip(zip_path, i, len(zips))
             total_extracted += extracted
-            total_skipped += skipped
+            total_skipped += already_existed
 
-            zip_path.unlink()
-            print(f"  └─ deleted {zip_path.name}")
+            accounted_for = extracted + already_existed
+            if accounted_for == total:
+                zip_path.unlink()
+                print(f"  └─ deleted {zip_path.name}")
+            else:
+                missing = total - accounted_for
+                print(f"  └─ KEPT {zip_path.name} — {missing} files unaccounted for, not deleting")
+                kept.append((zip_path, missing))
 
         except Exception as e:
             print(f"\n  ERROR processing {zip_path.name}: {e}")
@@ -119,9 +134,14 @@ def main():
 
     elapsed = time.monotonic() - overall_start
     print(f"\nDone in {elapsed/60:.1f} min")
-    print(f"  Total extracted : {total_extracted:,}")
-    print(f"  Total skipped   : {total_skipped:,}")
-    print(f"  Staged at       : {STAGE_DIR / 'Takeout' / 'Google Photos'}")
+    print(f"  Total extracted    : {total_extracted:,}")
+    print(f"  Total already had  : {total_skipped:,}")
+    print(f"  Staged at          : {STAGE_DIR / 'Takeout' / 'Google Photos'}")
+
+    if kept:
+        print(f"\n  ⚠️  {len(kept)} ZIP(s) kept due to unaccounted files:")
+        for p, n in kept:
+            print(f"     {p.name}  ({n} missing)")
 
 
 if __name__ == "__main__":

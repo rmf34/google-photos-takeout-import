@@ -102,6 +102,23 @@ class TestParseSidecarTimestamp:
         result = parse_sidecar(s)
         assert "datetime" not in result
 
+    def test_epoch_timestamp_ignored(self, tmp_path):
+        # timestamp "0" means no data — should not write 1970-01-01 to EXIF
+        s = make_sidecar(tmp_path, {
+            "photoTakenTime": {"timestamp": "0"},
+            "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+            "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+        })
+        assert "datetime" not in parse_sidecar(s)
+
+    def test_negative_timestamp_ignored(self, tmp_path):
+        s = make_sidecar(tmp_path, {
+            "photoTakenTime": {"timestamp": "-1"},
+            "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+            "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+        })
+        assert "datetime" not in parse_sidecar(s)
+
     def test_invalid_json_returns_empty(self, tmp_path):
         p = tmp_path / "bad.json"
         p.write_text("not valid json {{")
