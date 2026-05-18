@@ -6,7 +6,7 @@ Exits 0 if all hard checks pass (warnings are non-fatal).
 Exits 1 if any hard check fails.
 
 Usage:
-    .venv/bin/python precheck.py
+    uv run python precheck.py
 """
 
 import shutil
@@ -184,7 +184,7 @@ elif warnings:
     print(f"\n  {WARN}  {len(warnings)} warning(s) — safe to proceed:")
     for w in warnings:
         print(f"       • {w}")
-    print("\n  Ready for: venv/bin/python fix_metadata.py")
+    print("\n  Ready for: uv run python fix_metadata.py")
 else:
     print(f"\n  {PASS}  All checks passed.")
-    print("\n  Ready for: venv/bin/python fix_metadata.py")
+    print("\n  Ready for: uv run python fix_metadata.py")

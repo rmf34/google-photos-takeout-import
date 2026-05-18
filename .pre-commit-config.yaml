@@ -1,8 +1,8 @@
 # Hooks run automatically on commit (ruff) and push (pytest).
 #
 # Install once after cloning:
-#   pip install pre-commit
-#   pre-commit install --hook-type pre-commit --hook-type pre-push
+#   uv sync --extra dev
+#   uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 
 default_install_hook_types: [pre-commit, pre-push]
 

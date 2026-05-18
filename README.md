@@ -94,7 +94,7 @@ Google stores `photoTakenTime` as a **UTC Unix timestamp** in the sidecar JSON. 
 **Fallback:** If the photo has no GPS, or `timezonefinder` is not installed, the UTC timestamp is written directly. The **date** will always be correct. The **clock time** may be off by your UTC offset (e.g. a photo taken at 3pm EST is written as 8pm UTC). Install `timezonefinder` to avoid this.
 
 ```bash
-venv/bin/pip install timezonefinder   # enables DST-correct local time from GPS
+uv sync --extra dev   # timezonefinder is included; enables DST-correct local time from GPS
 ```
 
 **GPS date/time stamps** (`GPSDateStamp`, `GPSTimeStamp`) are always written in UTC regardless of timezone — this is required by the EXIF specification. `DateTimeOriginal` is local time; GPS timestamps are UTC. Both are written.

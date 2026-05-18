@@ -5,7 +5,7 @@ from Google Takeout JSON sidecar files.
 
 Timezone handling:
   - If the photo has GPS coordinates, the local timezone is looked up
-    from those coordinates (requires timezonefinder in the venv).
+    from those coordinates (requires timezonefinder — install via uv sync).
   - Without GPS, the UTC timestamp from the JSON is written as-is.
     Dates will be correct; the clock time may be off by your UTC offset.
 
@@ -35,7 +35,6 @@ from typing import Optional
 DATA_DIR = Path("~/photos")
 PHOTOS_DIR = DATA_DIR / "staged" / "Takeout" / "Google Photos"
 SCRIPT_DIR = Path(__file__).parent
-VENV_PYTHON = SCRIPT_DIR / "venv" / "bin" / "python"
 
 MEDIA_EXTS = {
     ".jpg",
