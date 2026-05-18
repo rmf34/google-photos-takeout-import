@@ -34,7 +34,10 @@ source .venv/bin/activate        # re-run this at the start of each shell sessio
 
 # 3. Install Python dependencies
 pip install timezonefinder       # required: DST-aware timezone lookup from GPS coords
-pip install pytest ruff          # optional: test runner and linter
+pip install pytest ruff pre-commit   # required for development (tests, linting, hooks)
+
+# 4. Install git hooks (runs ruff on commit, pytest on push)
+pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
 To confirm everything is ready:
@@ -42,7 +45,19 @@ To confirm everything is ready:
 ```bash
 exiftool -ver                    # should print a version number (e.g. 12.76)
 python -c "import timezonefinder; print('ok')"
+pytest -q                        # 85 tests, all should pass
 ```
+
+### Git hooks
+
+After `pre-commit install`, hooks run automatically:
+
+| Event | Checks |
+|---|---|
+| `git commit` | `ruff check --fix` (lint + auto-fix), `ruff format` |
+| `git push` | `pytest -q` (full test suite) |
+
+If ruff auto-fixes files on commit, it will abort the commit and show the changes — re-stage them (`git add`) and commit again. All hooks use `python` from your active `.venv`.
 
 ## Usage
 

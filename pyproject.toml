@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 dependencies = ["timezonefinder"]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "pre-commit"]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,29 @@
+# Hooks run automatically on commit (ruff) and push (pytest).
+#
+# Install once after cloning:
+#   pip install pre-commit
+#   pre-commit install --hook-type pre-commit --hook-type pre-push
+
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  # Ruff: managed by pre-commit (no venv activation needed)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.13
+    hooks:
+      - id: ruff
+        args: [--fix]
+        stages: [pre-commit]
+      - id: ruff-format
+        stages: [pre-commit]
+
+  # Pytest: pre-commit creates its own env with the listed dependencies
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: pytest -q
+        language: python
+        additional_dependencies: [pytest, timezonefinder]
+        pass_filenames: false
+        stages: [pre-push]

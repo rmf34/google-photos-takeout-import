@@ -17,13 +17,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install ruff pytest timezonefinder
+        run: pip install ruff pytest pre-commit timezonefinder
 
-      - name: Lint (ruff check)
+      - name: ruff check (lint)
         run: ruff check .
 
-      - name: Format check (ruff format)
+      - name: ruff format (format check)
         run: ruff format --check .
 
-      - name: Tests
+      - name: pytest (tests)
         run: pytest -v
