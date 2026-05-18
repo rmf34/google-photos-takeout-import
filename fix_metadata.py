@@ -107,6 +107,12 @@ def _get_tz_finder():
     return _tf
 
 
+# Timezone name cache keyed by (lat rounded to 0.1°, lon rounded to 0.1°).
+# Photos in the same album are almost always in the same city (~10 km precision
+# is more than enough for timezone resolution).
+_tz_cache: dict[tuple[float, float], str | None] = {}
+
+
 def utc_to_local_str(ts: int, lat: float, lon: float) -> str:
     """
     Convert a UTC Unix timestamp to a local datetime string for EXIF.
@@ -117,30 +123,60 @@ def utc_to_local_str(ts: int, lat: float, lon: float) -> str:
     tf = _get_tz_finder()
 
     if tf and (abs(lat) > 0.001 or abs(lon) > 0.001):
-        try:
-            tz_name = tf.timezone_at(lat=lat, lng=lon)
-            if tz_name:
+        key = (round(lat, 1), round(lon, 1))
+        if key not in _tz_cache:
+            try:
+                _tz_cache[key] = tf.timezone_at(lat=lat, lng=lon)
+            except Exception:
+                _tz_cache[key] = None
+        tz_name = _tz_cache[key]
+        if tz_name:
+            try:
                 from zoneinfo import ZoneInfo
 
                 dt_local = dt_utc.astimezone(ZoneInfo(tz_name))
                 return dt_local.strftime("%Y:%m:%d %H:%M:%S")
-        except Exception:
-            pass
+            except Exception:
+                pass
 
-    # UTC fallback — note this in stats
     return dt_utc.strftime("%Y:%m:%d %H:%M:%S")
 
 
-def find_sidecar(media_path: Path) -> Optional[Path]:
+def find_sidecar(media_path: Path, json_set: Optional[set[Path]] = None) -> Optional[Path]:
     name = media_path.name
     parent = media_path.parent
 
+    if json_set is not None:
+        # Fast path: O(1) set membership instead of stat() per suffix.
+        # Caller pre-scanned the album directory once; we reuse it here.
+        for suffix in SIDECAR_SUFFIXES:
+            c = parent / (name + suffix)
+            if c in json_set:
+                return c
+
+        m = _DUPE_RE.match(name)
+        if m:
+            stem, dupe_n, ext = m.group(1), m.group(2), m.group(3)
+            base = stem + ext
+            for suffix in SIDECAR_SUFFIXES:
+                suffix_base = suffix[: -len(".json")]
+                c = parent / (base + suffix_base + dupe_n + ".json")
+                if c in json_set:
+                    return c
+
+        prefix = name[: min(len(name), 40)]
+        for c in json_set:
+            if c.name.startswith(prefix):
+                return c
+
+        return None
+
+    # Slow path: individual stat() calls — used by precheck.py on single files.
     for suffix in SIDECAR_SUFFIXES:
         c = parent / (name + suffix)
         if c.exists():
             return c
 
-    # Handle Google Takeout duplicate naming: STEM(N).EXT → STEM.EXT.suffix_base(N).json
     m = _DUPE_RE.match(name)
     if m:
         stem, dupe_n, ext = m.group(1), m.group(2), m.group(3)
@@ -151,8 +187,6 @@ def find_sidecar(media_path: Path) -> Optional[Path]:
             if c.exists():
                 return c
 
-    # Fuzzy: any .json starting with first 40 chars of filename
-    # Handles unusual Google truncation lengths
     prefix = name[: min(len(name), 40)]
     for c in parent.iterdir():
         if c.name.startswith(prefix) and c.suffix == ".json" and c != media_path:
@@ -384,10 +418,11 @@ def main():
 
     for album_dir, files in sorted(albums.items()):
         album_name = album_dir.name
+        json_set = {f for f in album_dir.iterdir() if f.suffix == ".json"}
         entries = []
 
         for f in files:
-            sidecar = find_sidecar(f)
+            sidecar = find_sidecar(f, json_set)
             if not sidecar:
                 stats["no_sidecar"] += 1
                 prog.update(album=album_name)
