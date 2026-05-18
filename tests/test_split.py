@@ -154,6 +154,7 @@ class TestSafeMove:
         src.parent.mkdir()
         src.write_bytes(b"data")
         dst_dir = tmp_path / "dst"
+        dst_dir.mkdir()  # caller is responsible for pre-creating dst_dir
 
         result = sya.safe_move(src, dst_dir)
 

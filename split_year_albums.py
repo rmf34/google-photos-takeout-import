@@ -121,14 +121,13 @@ def find_sidecars(media_path: Path, json_set: set[Path]) -> list[Path]:
 
 
 def safe_move(src: Path, dst_dir: Path) -> bool:
-    """Move src into dst_dir. Returns False on collision."""
+    """Move src into dst_dir. Returns False on collision. dst_dir must already exist."""
     dst = dst_dir / src.name
     if dst == src:
         return True
     if dst.exists():
         return False
     if not DRY_RUN:
-        dst_dir.mkdir(parents=True, exist_ok=True)
         src.rename(dst)
     return True
 
@@ -148,6 +147,16 @@ def split_album(album_dir: Path, year: str) -> dict:
     # Pre-parse every sidecar's month upfront — eliminates per-file JSON reads
     # in the main loop (one sequential pass over all JSONs instead of random access).
     sidecar_months: dict[Path, str | None] = {sc: _parse_month(sc) for sc in json_set}
+
+    # Determine all destination dirs and pre-create them — avoids 60k mkdir
+    # syscalls inside the loop (at most 13 dirs: 12 months + unknown).
+    months_needed = set(sidecar_months.values())
+    for m in months_needed:
+        subdir = f"Photos from {m}" if m else f"Photos from {year}-unknown"
+        if not DRY_RUN:
+            (PHOTOS_DIR / subdir).mkdir(parents=True, exist_ok=True)
+    if not DRY_RUN:
+        (PHOTOS_DIR / f"Photos from {year}-unknown").mkdir(parents=True, exist_ok=True)
 
     start = time.monotonic()
     last_print = 0.0
