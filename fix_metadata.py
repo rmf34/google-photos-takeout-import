@@ -282,9 +282,9 @@ def run_exiftool_batch(entries: list[dict]) -> tuple[int, int]:
             capture_output=True,
             text=True,
         )
-        if result.returncode != 0:
-            return 0, len(entries)
         # Parse "N image files updated" from stderr for accurate success count
+        # Note: exiftool exits 1 when ANY file fails (e.g. unsupported MKV/WebM),
+        # even if others succeeded. Always parse stderr — never bail on returncode.
         updated = 0
         for line in result.stderr.splitlines():
             if "image files updated" in line or "image files unchanged" in line:
