@@ -152,7 +152,7 @@ PNG does not support standard EXIF date tags. XMP is used instead:
 | `XMP-xmp:CreateDate` | Local datetime |
 | `PNG:CreationTime` | Local datetime |
 
-**Video (MP4, MOV, M4V, 3GP, AVI, MKV, WMV, MPG):**
+**Video (MP4, MOV, M4V, 3GP, MPG):**
 Video containers use QuickTime-style metadata atoms:
 
 | Tag | Value |
@@ -163,6 +163,8 @@ Video containers use QuickTime-style metadata atoms:
 | `TrackModifyDate` | Local datetime |
 | `MediaCreateDate` | Local datetime |
 | `MediaModifyDate` | Local datetime |
+
+**Unsupported video formats (MKV, WebM, AVI, WMV):** exiftool cannot write metadata to these containers. Files of these types are counted as `Exiftool errors` in the summary — this is expected and harmless. The files themselves are untouched.
 
 **All file types (when present in sidecar):**
 
