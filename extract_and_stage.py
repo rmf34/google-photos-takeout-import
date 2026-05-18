@@ -10,6 +10,7 @@ Note: 'Photos from YEAR' folders are extracted but will not become albums
 when uploading — those photos go into the library unsorted, which is correct
 since they weren't in any named album originally.
 """
+
 import re
 import shutil
 import sys
@@ -63,7 +64,9 @@ class Progress:
         elapsed = time.monotonic() - self.start
         rate = self.count / elapsed if elapsed > 0 else 0
         print(
-            f"\r  {self.label}  {self.count:,} files  {rate:.1f}/s  {elapsed:.0f}s  {suffix}".ljust(80),
+            f"\r  {self.label}  {self.count:,} files  {rate:.1f}/s  {elapsed:.0f}s  {suffix}".ljust(
+                80
+            ),
             flush=True,
         )
 
@@ -133,7 +136,7 @@ def main():
             sys.exit(1)
 
     elapsed = time.monotonic() - overall_start
-    print(f"\nDone in {elapsed/60:.1f} min")
+    print(f"\nDone in {elapsed / 60:.1f} min")
     print(f"  Total extracted    : {total_extracted:,}")
     print(f"  Total already had  : {total_skipped:,}")
     print(f"  Staged at          : {STAGE_DIR / 'Takeout' / 'Google Photos'}")

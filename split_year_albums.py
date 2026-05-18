@@ -11,6 +11,7 @@ Run AFTER extract_and_stage.py and BEFORE precheck.py / fix_metadata.py.
 Usage:
     python split_year_albums.py [--dry-run]
 """
+
 import json
 import re
 import sys
@@ -19,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fix_metadata import PHOTOS_DIR, MEDIA_EXTS, SIDECAR_SUFFIXES, _DUPE_RE
+from fix_metadata import _DUPE_RE, MEDIA_EXTS, PHOTOS_DIR, SIDECAR_SUFFIXES
 
 YEAR_RE = re.compile(r"^Photos from (\d{4})$")
 DRY_RUN = "--dry-run" in sys.argv
@@ -59,8 +60,9 @@ def _dupe_candidates(name: str, parent: Path) -> list[Path]:
         return []
     stem, dupe_n, ext = m.group(1), m.group(2), m.group(3)
     base = stem + ext
-    return [parent / (base + suffix[: -len(".json")] + dupe_n + ".json")
-            for suffix in SIDECAR_SUFFIXES]
+    return [
+        parent / (base + suffix[: -len(".json")] + dupe_n + ".json") for suffix in SIDECAR_SUFFIXES
+    ]
 
 
 def get_month(media_path: Path, json_set: set[Path]) -> str | None:
@@ -79,7 +81,7 @@ def get_month(media_path: Path, json_set: set[Path]) -> str | None:
             return _parse_month(c)
 
     # Fuzzy fallback for Google's unusual truncation lengths
-    prefix = name[:min(len(name), 40)]
+    prefix = name[: min(len(name), 40)]
     for c in json_set:
         if c.name.startswith(prefix):
             return _parse_month(c)
@@ -106,7 +108,7 @@ def find_sidecars(media_path: Path, json_set: set[Path]) -> list[Path]:
             sidecars.append(c)
             seen.add(c)
 
-    prefix = name[:min(len(name), 40)]
+    prefix = name[: min(len(name), 40)]
     for c in json_set:
         if c.name.startswith(prefix) and c not in seen:
             sidecars.append(c)
@@ -173,8 +175,9 @@ def split_album(album_dir: Path, year: str) -> dict:
             filled = int(bar_w * pct / 100)
             bar = "█" * filled + "░" * (bar_w - filled)
             print(
-                f"\r  [{bar}] {pct:5.1f}%  {i+1:,}/{stats['total']:,}  {rate:.0f}/s",
-                end="", flush=True,
+                f"\r  [{bar}] {pct:5.1f}%  {i + 1:,}/{stats['total']:,}  {rate:.0f}/s",
+                end="",
+                flush=True,
             )
 
     print()
@@ -221,14 +224,18 @@ def main():
         # Clean up original directory if all media was moved out
         if not DRY_RUN and album_dir.exists():
             remaining = list(album_dir.iterdir())
-            remaining_media = [f for f in remaining if f.is_file() and f.suffix.lower() in MEDIA_EXTS]
+            remaining_media = [
+                f for f in remaining if f.is_file() and f.suffix.lower() in MEDIA_EXTS
+            ]
             if remaining_media:
                 print(f"  WARN: {len(remaining_media):,} media file(s) still in {album_dir.name}")
             elif not remaining:
                 album_dir.rmdir()
             else:
                 non_media = [f.name for f in remaining[:5]]
-                print(f"  {len(remaining)} non-media file(s) left in {album_dir.name} (e.g. {', '.join(non_media)})")
+                print(
+                    f"  {len(remaining)} non-media file(s) left in {album_dir.name} (e.g. {', '.join(non_media)})"
+                )
         print()
 
     elapsed = time.monotonic() - overall_start
@@ -237,7 +244,7 @@ def main():
     print(f"Moved                : {overall_stats['moved']:,}")
     print(f"No month (→ unknown) : {overall_stats['no_month']:,}")
     print(f"Collisions (skipped) : {overall_stats['collision']:,}")
-    print(f"Elapsed              : {elapsed/60:.1f} min")
+    print(f"Elapsed              : {elapsed / 60:.1f} min")
     if DRY_RUN:
         print("\nDRY RUN complete — re-run without --dry-run to apply changes.")
     else:

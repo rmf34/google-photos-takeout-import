@@ -1,10 +1,9 @@
 """Tests for split_year_albums.py"""
+
 import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -16,6 +15,7 @@ with patch.object(sys, "argv", ["split_year_albums.py"]):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_photo(directory: Path, name: str, ts: int | None = 1609459200) -> Path:
     """Create a fake photo file and its sidecar. ts=None → no sidecar."""
@@ -33,6 +33,7 @@ def make_photo(directory: Path, name: str, ts: int | None = 1609459200) -> Path:
 # ---------------------------------------------------------------------------
 # _parse_month
 # ---------------------------------------------------------------------------
+
 
 class TestParseMonth:
     def test_normal_timestamp(self, tmp_path):
@@ -62,9 +63,9 @@ class TestParseMonth:
 
     def test_different_months(self, tmp_path):
         cases = [
-            ("1614556800", "2021-03"),   # March 2021
-            ("1625097600", "2021-07"),   # July 2021
-            ("1640995200", "2022-01"),   # January 2022
+            ("1614556800", "2021-03"),  # March 2021
+            ("1625097600", "2021-07"),  # July 2021
+            ("1640995200", "2022-01"),  # January 2022
         ]
         for ts, expected in cases:
             sc = tmp_path / f"{ts}.json"
@@ -75,6 +76,7 @@ class TestParseMonth:
 # ---------------------------------------------------------------------------
 # get_month
 # ---------------------------------------------------------------------------
+
 
 class TestGetMonth:
     def test_finds_supplemental_metadata_sidecar(self, tmp_path):
@@ -119,6 +121,7 @@ class TestGetMonth:
 # find_sidecars
 # ---------------------------------------------------------------------------
 
+
 class TestFindSidecars:
     def test_finds_supplemental_metadata(self, tmp_path):
         make_photo(tmp_path, "IMG_001.jpg", ts=1609459200)
@@ -143,6 +146,7 @@ class TestFindSidecars:
 # ---------------------------------------------------------------------------
 # safe_move
 # ---------------------------------------------------------------------------
+
 
 class TestSafeMove:
     def test_moves_file(self, tmp_path):
@@ -181,6 +185,7 @@ class TestSafeMove:
 # split_album (integration)
 # ---------------------------------------------------------------------------
 
+
 class TestSplitAlbum:
     def _make_album(self, base: Path, year: str, photos: list[tuple[str, int | None]]) -> Path:
         """Create a 'Photos from YEAR' album with given (filename, timestamp) pairs."""
@@ -192,10 +197,14 @@ class TestSplitAlbum:
 
     def test_splits_into_month_dirs(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sya, "PHOTOS_DIR", tmp_path)
-        album = self._make_album(tmp_path, "2021", [
-            ("jan.jpg", 1609459200),   # 2021-01
-            ("mar.jpg", 1614556800),   # 2021-03
-        ])
+        album = self._make_album(
+            tmp_path,
+            "2021",
+            [
+                ("jan.jpg", 1609459200),  # 2021-01
+                ("mar.jpg", 1614556800),  # 2021-03
+            ],
+        )
 
         stats = sya.split_album(album, "2021")
 
@@ -250,10 +259,10 @@ class TestSplitAlbum:
     def test_mixed_months(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sya, "PHOTOS_DIR", tmp_path)
         photos = [
-            ("jan_a.jpg", 1609459200),   # 2021-01
-            ("jan_b.jpg", 1611878400),   # 2021-01
-            ("feb.jpg",   1613520000),   # 2021-02
-            ("none.jpg",  None),
+            ("jan_a.jpg", 1609459200),  # 2021-01
+            ("jan_b.jpg", 1611878400),  # 2021-01
+            ("feb.jpg", 1613520000),  # 2021-02
+            ("none.jpg", None),
         ]
         album = self._make_album(tmp_path, "2021", photos)
 

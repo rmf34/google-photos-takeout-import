@@ -21,6 +21,7 @@ files and are never touched by this script.
 
 Safe to re-run — exiftool is idempotent on already-correct files.
 """
+
 import json
 import re
 import subprocess
@@ -37,12 +38,46 @@ SCRIPT_DIR = Path(__file__).parent
 VENV_PYTHON = SCRIPT_DIR / "venv" / "bin" / "python"
 
 MEDIA_EXTS = {
-    ".jpg", ".jpeg", ".heic", ".heif",
-    ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp",
-    ".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".wmv", ".mpg", ".mpeg",
+    ".jpg",
+    ".jpeg",
+    ".heic",
+    ".heif",
+    ".heics",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".tif",
+    ".webp",
+    ".jp2",
+    ".avif",
+    ".jxl",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".m4v",
+    ".3gp",
+    ".3g2",
+    ".wmv",
+    ".mpg",
+    ".mpeg",
+    ".webm",
 }
 
-VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".3gp", ".avi", ".mkv", ".wmv", ".mpg", ".mpeg"}
+VIDEO_EXTS = {
+    ".mp4",
+    ".mov",
+    ".m4v",
+    ".3gp",
+    ".3g2",
+    ".avi",
+    ".mkv",
+    ".wmv",
+    ".mpg",
+    ".mpeg",
+    ".webm",
+}
 
 SIDECAR_SUFFIXES = [
     ".supplemental-metadata.json",
@@ -59,12 +94,14 @@ _DUPE_RE = re.compile(r"^(.*?)(\(\d+\))(\.[^.]+)$")
 # Timezone finder — loaded once if available
 _tf = None
 
+
 def _get_tz_finder():
     global _tf
     if _tf is not None:
         return _tf
     try:
         from timezonefinder import TimezoneFinder
+
         _tf = TimezoneFinder()
     except ImportError:
         _tf = False
@@ -85,6 +122,7 @@ def utc_to_local_str(ts: int, lat: float, lon: float) -> str:
             tz_name = tf.timezone_at(lat=lat, lng=lon)
             if tz_name:
                 from zoneinfo import ZoneInfo
+
                 dt_local = dt_utc.astimezone(ZoneInfo(tz_name))
                 return dt_local.strftime("%Y:%m:%d %H:%M:%S")
         except Exception:
@@ -116,7 +154,7 @@ def find_sidecar(media_path: Path) -> Optional[Path]:
 
     # Fuzzy: any .json starting with first 40 chars of filename
     # Handles unusual Google truncation lengths
-    prefix = name[:min(len(name), 40)]
+    prefix = name[: min(len(name), 40)]
     for c in parent.iterdir():
         if c.name.startswith(prefix) and c.suffix == ".json" and c != media_path:
             return c
@@ -235,9 +273,7 @@ def run_exiftool_batch(entries: list[dict]) -> tuple[int, int]:
             total_err += err
         return total_ok, total_err
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
         json.dump(entries, f)
         tmp_path = f.name
     try:
@@ -286,7 +322,7 @@ class Progress:
         rate = self.done / elapsed if elapsed > 0 else 0
         pct = self.done / self.total * 100 if self.total else 0
         eta = (self.total - self.done) / rate if rate > 0 else 0
-        eta_str = f"{eta/60:.0f}m {eta%60:.0f}s" if eta > 60 else f"{eta:.0f}s"
+        eta_str = f"{eta / 60:.0f}m {eta % 60:.0f}s" if eta > 60 else f"{eta:.0f}s"
         bar_w = 25
         filled = int(bar_w * pct / 100)
         bar = "█" * filled + "░" * (bar_w - filled)
@@ -304,8 +340,8 @@ class Progress:
         elapsed = time.monotonic() - self.start
         rate = self.done / elapsed if elapsed > 0 else 0
         print(
-            f"\r[{'█'*25}] 100.0%  {self.done:,}/{self.total:,}  "
-            f"{rate:.1f}/s  {elapsed/60:.1f} min total".ljust(90),
+            f"\r[{'█' * 25}] 100.0%  {self.done:,}/{self.total:,}  "
+            f"{rate:.1f}/s  {elapsed / 60:.1f} min total".ljust(90),
             flush=True,
         )
         print()
@@ -313,8 +349,7 @@ class Progress:
 
 def collect_media_files(photos_dir: Path) -> list[Path]:
     return sorted(
-        f for f in photos_dir.rglob("*")
-        if f.is_file() and f.suffix.lower() in MEDIA_EXTS
+        f for f in photos_dir.rglob("*") if f.is_file() and f.suffix.lower() in MEDIA_EXTS
     )
 
 
@@ -379,7 +414,7 @@ def main():
     prog.finish()
 
     total = len(all_files)
-    print(f"{'='*55}")
+    print(f"{'=' * 55}")
     print(f"Total media files    : {total:,}")
     print(f"Metadata fixed       : {stats['ok']:,}")
     print(f"No sidecar found     : {stats['no_sidecar']:,}")

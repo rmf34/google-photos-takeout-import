@@ -1,12 +1,14 @@
 import json
-import pytest
 from pathlib import Path
-from fix_metadata import find_sidecar, parse_sidecar, build_exiftool_entry, utc_to_local_str
 
+import pytest
+
+from fix_metadata import build_exiftool_entry, find_sidecar, parse_sidecar, utc_to_local_str
 
 # ---------------------------------------------------------------------------
 # find_sidecar
 # ---------------------------------------------------------------------------
+
 
 class TestFindSidecar:
     def _make_photo(self, tmp_path, name="IMG_1234.jpg"):
@@ -98,6 +100,7 @@ class TestFindSidecar:
 # parse_sidecar
 # ---------------------------------------------------------------------------
 
+
 def make_sidecar(tmp_path, data: dict, name="photo.jpg.supplemental-metadata.json") -> Path:
     p = tmp_path / name
     p.write_text(json.dumps(data))
@@ -106,11 +109,14 @@ def make_sidecar(tmp_path, data: dict, name="photo.jpg.supplemental-metadata.jso
 
 class TestParseSidecarTimestamp:
     def test_extracts_datetime(self, tmp_path):
-        s = make_sidecar(tmp_path, {
-            "photoTakenTime": {"timestamp": "1550521691"},
-            "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-            "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-        })
+        s = make_sidecar(
+            tmp_path,
+            {
+                "photoTakenTime": {"timestamp": "1550521691"},
+                "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+                "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+            },
+        )
         result = parse_sidecar(s)
         assert "datetime" in result
         # Timestamp 1550521691 = 2019-02-18 20:28:11 UTC
@@ -118,28 +124,37 @@ class TestParseSidecarTimestamp:
         assert result["datetime"].startswith("2019:02:18")
 
     def test_missing_timestamp_no_datetime(self, tmp_path):
-        s = make_sidecar(tmp_path, {
-            "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-            "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-        })
+        s = make_sidecar(
+            tmp_path,
+            {
+                "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+                "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+            },
+        )
         result = parse_sidecar(s)
         assert "datetime" not in result
 
     def test_epoch_timestamp_ignored(self, tmp_path):
         # timestamp "0" means no data — should not write 1970-01-01 to EXIF
-        s = make_sidecar(tmp_path, {
-            "photoTakenTime": {"timestamp": "0"},
-            "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-            "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-        })
+        s = make_sidecar(
+            tmp_path,
+            {
+                "photoTakenTime": {"timestamp": "0"},
+                "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+                "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+            },
+        )
         assert "datetime" not in parse_sidecar(s)
 
     def test_negative_timestamp_ignored(self, tmp_path):
-        s = make_sidecar(tmp_path, {
-            "photoTakenTime": {"timestamp": "-1"},
-            "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-            "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-        })
+        s = make_sidecar(
+            tmp_path,
+            {
+                "photoTakenTime": {"timestamp": "-1"},
+                "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+                "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+            },
+        )
         assert "datetime" not in parse_sidecar(s)
 
     def test_invalid_json_returns_empty(self, tmp_path):
@@ -150,11 +165,14 @@ class TestParseSidecarTimestamp:
 
 class TestParseSidecarGPS:
     def _sidecar(self, tmp_path, lat, lon, alt=0.0, exif_lat=0.0, exif_lon=0.0):
-        return make_sidecar(tmp_path, {
-            "photoTakenTime": {"timestamp": "1550521691"},
-            "geoData": {"latitude": lat, "longitude": lon, "altitude": alt},
-            "geoDataExif": {"latitude": exif_lat, "longitude": exif_lon, "altitude": 0.0},
-        })
+        return make_sidecar(
+            tmp_path,
+            {
+                "photoTakenTime": {"timestamp": "1550521691"},
+                "geoData": {"latitude": lat, "longitude": lon, "altitude": alt},
+                "geoDataExif": {"latitude": exif_lat, "longitude": exif_lon, "altitude": 0.0},
+            },
+        )
 
     def test_northern_eastern_hemisphere(self, tmp_path):
         s = self._sidecar(tmp_path, lat=40.65, lon=73.79)
@@ -203,20 +221,26 @@ class TestParseSidecarGPS:
 
     def test_prefers_geoDataExif_when_nonzero(self, tmp_path):
         # geoDataExif has real coords; geoData has different ones
-        s = make_sidecar(tmp_path, {
-            "photoTakenTime": {"timestamp": "1550521691"},
-            "geoData": {"latitude": 10.0, "longitude": 20.0, "altitude": 0.0},
-            "geoDataExif": {"latitude": 51.5, "longitude": -0.12, "altitude": 0.0},
-        })
+        s = make_sidecar(
+            tmp_path,
+            {
+                "photoTakenTime": {"timestamp": "1550521691"},
+                "geoData": {"latitude": 10.0, "longitude": 20.0, "altitude": 0.0},
+                "geoDataExif": {"latitude": 51.5, "longitude": -0.12, "altitude": 0.0},
+            },
+        )
         gps = parse_sidecar(s)["gps"]
-        assert gps["lat"] == pytest.approx(51.5)   # geoDataExif, not geoData
+        assert gps["lat"] == pytest.approx(51.5)  # geoDataExif, not geoData
 
     def test_falls_back_to_geoData_when_exif_zero(self, tmp_path):
-        s = make_sidecar(tmp_path, {
-            "photoTakenTime": {"timestamp": "1550521691"},
-            "geoData": {"latitude": 48.86, "longitude": 2.35, "altitude": 0.0},
-            "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-        })
+        s = make_sidecar(
+            tmp_path,
+            {
+                "photoTakenTime": {"timestamp": "1550521691"},
+                "geoData": {"latitude": 48.86, "longitude": 2.35, "altitude": 0.0},
+                "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+            },
+        )
         gps = parse_sidecar(s)["gps"]
         assert gps["lat"] == pytest.approx(48.86)
 
@@ -229,21 +253,27 @@ class TestParseSidecarGPS:
 
 class TestParseSidecarDescription:
     def test_description_included(self, tmp_path):
-        s = make_sidecar(tmp_path, {
-            "photoTakenTime": {"timestamp": "1550521691"},
-            "description": "Trip to Italy",
-            "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-            "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-        })
+        s = make_sidecar(
+            tmp_path,
+            {
+                "photoTakenTime": {"timestamp": "1550521691"},
+                "description": "Trip to Italy",
+                "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+                "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+            },
+        )
         assert parse_sidecar(s)["description"] == "Trip to Italy"
 
     def test_empty_description_not_included(self, tmp_path):
-        s = make_sidecar(tmp_path, {
-            "photoTakenTime": {"timestamp": "1550521691"},
-            "description": "",
-            "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-            "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
-        })
+        s = make_sidecar(
+            tmp_path,
+            {
+                "photoTakenTime": {"timestamp": "1550521691"},
+                "description": "",
+                "geoData": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+                "geoDataExif": {"latitude": 0.0, "longitude": 0.0, "altitude": 0.0},
+            },
+        )
         assert "description" not in parse_sidecar(s)
 
 
@@ -255,9 +285,12 @@ SAMPLE_METADATA = {
     "datetime": "2019:02:18 15:28:11",
     "ts_utc": 1550521691,
     "gps": {
-        "lat": 40.65, "lat_ref": "N",
-        "lon": 73.79, "lon_ref": "W",
-        "alt": 10.0, "alt_ref": "Above Sea Level",
+        "lat": 40.65,
+        "lat_ref": "N",
+        "lon": 73.79,
+        "lon_ref": "W",
+        "alt": 10.0,
+        "alt_ref": "Above Sea Level",
     },
     "description": "A caption",
 }
@@ -311,7 +344,10 @@ class TestBuildExiftoolEntry:
     def test_below_sea_level_alt_ref(self, tmp_path):
         photo = tmp_path / "photo.jpg"
         photo.write_bytes(b"x")
-        meta = {**SAMPLE_METADATA, "gps": {**SAMPLE_METADATA["gps"], "alt": 430.0, "alt_ref": "Below Sea Level"}}
+        meta = {
+            **SAMPLE_METADATA,
+            "gps": {**SAMPLE_METADATA["gps"], "alt": 430.0, "alt_ref": "Below Sea Level"},
+        }
         entry = build_exiftool_entry(photo, meta)
         assert entry["GPSAltitudeRef"] == "Below Sea Level"
         assert entry["GPSAltitude"] == pytest.approx(430.0)
@@ -351,6 +387,7 @@ class TestBuildExiftoolEntry:
 # ---------------------------------------------------------------------------
 # utc_to_local_str — timezone conversion
 # ---------------------------------------------------------------------------
+
 
 class TestUtcToLocalStr:
     def test_new_york_winter_est(self):

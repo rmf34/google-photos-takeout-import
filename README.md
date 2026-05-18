@@ -28,9 +28,12 @@ Code lives in `~/portainer/google-photos-takeout-import/`.
 # Install exiftool
 sudo apt-get install -y libimage-exiftool-perl
 
-# Create venv and install timezone library
-python3 -m venv venv
-venv/bin/pip install timezonefinder
+# Create .venv and install dependencies
+python3 -m venv .venv
+.venv/bin/pip install timezonefinder
+
+# Activate (optional, or just prefix commands with .venv/bin/)
+source .venv/bin/activate
 ```
 
 ## Usage
@@ -43,10 +46,10 @@ python3 extract_and_stage.py
 python3 split_year_albums.py
 
 # Step 3: sanity checks (exits 1 on failure — fix before proceeding)
-venv/bin/python precheck.py
+.venv/bin/python precheck.py
 
 # Step 4: write EXIF metadata from JSON sidecars into all media files
-venv/bin/python fix_metadata.py
+.venv/bin/python fix_metadata.py
 ```
 
 Steps 1 and 4 are safe to re-run — already-extracted files are skipped, and exiftool is idempotent. Step 2 is also re-runnable: files already in a monthly folder won't be moved again (collision detection skips them).

@@ -6,8 +6,9 @@ Exits 0 if all hard checks pass (warnings are non-fatal).
 Exits 1 if any hard check fails.
 
 Usage:
-    venv/bin/python precheck.py
+    .venv/bin/python precheck.py
 """
+
 import shutil
 import subprocess
 import sys
@@ -16,14 +17,18 @@ from pathlib import Path
 # Must match fix_metadata.py
 sys.path.insert(0, str(Path(__file__).parent))
 from fix_metadata import (
-    PHOTOS_DIR, MEDIA_EXTS,
-    find_sidecar, parse_sidecar, build_exiftool_entry, run_exiftool_batch,
+    MEDIA_EXTS,
+    PHOTOS_DIR,
     _get_tz_finder,
+    build_exiftool_entry,
+    find_sidecar,
+    parse_sidecar,
+    run_exiftool_batch,
 )
 
-PASS  = "\033[32m✓\033[0m"
-WARN  = "\033[33m⚠\033[0m"
-FAIL  = "\033[31m✗\033[0m"
+PASS = "\033[32m✓\033[0m"
+WARN = "\033[33m⚠\033[0m"
+FAIL = "\033[31m✗\033[0m"
 
 failures = []
 warnings = []
@@ -45,12 +50,20 @@ print("\n── Environment ─────────────────�
 
 # exiftool
 result = subprocess.run(["exiftool", "-ver"], capture_output=True, text=True)
-check("exiftool installed", result.returncode == 0, f"v{result.stdout.strip()}" if result.returncode == 0 else result.stderr.strip())
+check(
+    "exiftool installed",
+    result.returncode == 0,
+    f"v{result.stdout.strip()}" if result.returncode == 0 else result.stderr.strip(),
+)
 
 # timezonefinder
 tf = _get_tz_finder()
-check("timezonefinder available (DST-aware local time)", bool(tf), fatal=False,
-      detail="dates will be written as UTC without this" if not tf else "")
+check(
+    "timezonefinder available (DST-aware local time)",
+    bool(tf),
+    fatal=False,
+    detail="dates will be written as UTC without this" if not tf else "",
+)
 
 # ---------------------------------------------------------------------------
 print("\n── Staged directory ────────────────────────────────────")
@@ -67,7 +80,7 @@ if PHOTOS_DIR.exists():
     check("media files found", len(media) > 0, f"{len(media):,} files")
     coverage = len(sidecars) / len(media) * 100 if media else 0
     check(
-        f"sidecar coverage ≥ 90%",
+        "sidecar coverage ≥ 90%",
         coverage >= 90,
         f"{coverage:.1f}%  ({len(sidecars):,} sidecars / {len(media):,} media)",
         fatal=False,
@@ -110,7 +123,8 @@ if PHOTOS_DIR.exists() and failures == []:
         # Show EXIF before
         before = subprocess.run(
             ["exiftool", "-DateTimeOriginal", "-GPSLatitude", "-GPSLongitude", sample_file],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         print("  Before:")
         for line in before.stdout.strip().splitlines():
@@ -124,9 +138,17 @@ if PHOTOS_DIR.exists() and failures == []:
 
         # Show EXIF after
         after = subprocess.run(
-            ["exiftool", "-DateTimeOriginal", "-GPSLatitude", "-GPSLongitude",
-             "-GPSDateStamp", "-GPSTimeStamp", sample_file],
-            capture_output=True, text=True,
+            [
+                "exiftool",
+                "-DateTimeOriginal",
+                "-GPSLatitude",
+                "-GPSLongitude",
+                "-GPSDateStamp",
+                "-GPSTimeStamp",
+                sample_file,
+            ],
+            capture_output=True,
+            text=True,
         )
         print("  After:")
         for line in after.stdout.strip().splitlines():
@@ -143,8 +165,12 @@ if PHOTOS_DIR.exists() and failures == []:
             f"expected={sample_meta['datetime']}  got={written_dt}",
         )
     else:
-        check("found sample file with GPS + sidecar", False, fatal=False,
-              detail="no GPS photo found to test with")
+        check(
+            "found sample file with GPS + sidecar",
+            False,
+            fatal=False,
+            detail="no GPS photo found to test with",
+        )
 
 # ---------------------------------------------------------------------------
 print("\n── Summary ─────────────────────────────────────────────")

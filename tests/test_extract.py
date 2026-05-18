@@ -1,7 +1,7 @@
 import zipfile
-import pytest
 from pathlib import Path
-from extract_and_stage import is_year_album, album_name, extract_zip, STAGE_DIR
+
+from extract_and_stage import album_name, extract_zip, is_year_album
 
 
 class TestAlbumName:
@@ -9,7 +9,9 @@ class TestAlbumName:
         assert album_name("Takeout/Google Photos/Italy Feb 2019/IMG_1234.jpg") == "Italy Feb 2019"
 
     def test_returns_year_album_name(self):
-        assert album_name("Takeout/Google Photos/Photos from 2019/IMG_1234.jpg") == "Photos from 2019"
+        assert (
+            album_name("Takeout/Google Photos/Photos from 2019/IMG_1234.jpg") == "Photos from 2019"
+        )
 
     def test_returns_none_for_non_album_path(self):
         assert album_name("Takeout/print-subscriptions.json") is None
@@ -48,6 +50,7 @@ class TestIsYearAlbum:
 # extract_zip — count accuracy drives the delete-or-keep decision
 # ---------------------------------------------------------------------------
 
+
 def make_zip(path: Path, entries: dict[str, bytes]) -> Path:
     """Create a ZIP at `path` with {member_name: content} entries."""
     with zipfile.ZipFile(path, "w") as zf:
@@ -72,9 +75,9 @@ class TestExtractZipCounts:
 
         extracted, already_existed, total = extract_zip(zip_path, 1, 1)
 
-        assert extracted == 6          # 3 images + 3 sidecars
+        assert extracted == 6  # 3 images + 3 sidecars
         assert already_existed == 0
-        assert total == 6              # directory entries excluded from total
+        assert total == 6  # directory entries excluded from total
         assert extracted + already_existed == total
 
     def test_rerun_counts_as_already_existed(self, tmp_path, monkeypatch):
@@ -102,13 +105,13 @@ class TestExtractZipCounts:
         extracted, already_existed, total = extract_zip(zip_path, 1, 1)
 
         assert already_existed == 2
-        assert extracted == 4          # remaining 1 image + 3 sidecars
+        assert extracted == 4  # remaining 1 image + 3 sidecars
         assert extracted + already_existed == total
 
     def test_directory_entries_excluded_from_total(self, tmp_path, monkeypatch):
         monkeypatch.setattr("extract_and_stage.STAGE_DIR", tmp_path)
         entries = {
-            "Takeout/Google Photos/Album/": b"",   # dir — should not count
+            "Takeout/Google Photos/Album/": b"",  # dir — should not count
             "Takeout/Google Photos/Album/photo.jpg": b"x",
         }
         zip_path = make_zip(tmp_path / "test.zip", entries)
