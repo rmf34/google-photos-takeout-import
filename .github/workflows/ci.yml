@@ -12,18 +12,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install ruff pytest pre-commit timezonefinder
+        run: uv sync --extra dev
 
       - name: ruff check (lint)
-        run: ruff check .
+        run: uv run ruff check .
 
       - name: ruff format (format check)
-        run: ruff format --check .
+        run: uv run ruff format --check .
 
       - name: pytest (tests)
-        run: pytest -v
+        run: uv run pytest -v

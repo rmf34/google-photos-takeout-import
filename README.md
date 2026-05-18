@@ -25,27 +25,25 @@ Code lives in `~/portainer/google-photos-takeout-import/`.
 ## Setup
 
 ```bash
-# 1. Install exiftool (system package)
+# 1. Install uv (fast Python package manager, replaces pip + venv)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Install exiftool (system package)
 sudo apt-get install -y libimage-exiftool-perl
 
-# 2. Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate        # re-run this at the start of each shell session
-
-# 3. Install Python dependencies
-pip install timezonefinder       # required: DST-aware timezone lookup from GPS coords
-pip install pytest ruff pre-commit   # required for development (tests, linting, hooks)
+# 3. Install all Python dependencies (creates .venv automatically)
+uv sync --extra dev
 
 # 4. Install git hooks (runs ruff on commit, pytest on push)
-pre-commit install --hook-type pre-commit --hook-type pre-push
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
 To confirm everything is ready:
 
 ```bash
-exiftool -ver                    # should print a version number (e.g. 12.76)
-python -c "import timezonefinder; print('ok')"
-pytest -q                        # 85 tests, all should pass
+exiftool -ver                             # should print a version number (e.g. 12.76)
+uv run python -c "import timezonefinder; print('ok')"
+uv run pytest -q                          # 85 tests, all should pass
 ```
 
 ### Git hooks
@@ -57,33 +55,28 @@ After `pre-commit install`, hooks run automatically:
 | `git commit` | `ruff check --fix` (lint + auto-fix), `ruff format` |
 | `git push` | `pytest -q` (full test suite) |
 
-If ruff auto-fixes files on commit, it will abort the commit and show the changes — re-stage them (`git add`) and commit again. All hooks use `python` from your active `.venv`.
+If ruff auto-fixes files on commit, it will abort the commit and show the changes — re-stage them (`git add`) and commit again.
 
 ## Usage
 
-Activate the venv first if you haven't already:
-
-```bash
-source .venv/bin/activate
-```
-
-Then run each step in order:
-
 ```bash
 # Step 1: extract all ZIPs (deletes each ZIP after successful extraction)
-python extract_and_stage.py
+python3 extract_and_stage.py
 
 # Step 2: split 'Photos from YEAR' into monthly sub-albums (required before fix_metadata)
-python split_year_albums.py
+python3 split_year_albums.py
 
 # Step 3: sanity checks (exits 1 on failure — fix before proceeding)
-python precheck.py
+uv run python precheck.py
 
 # Step 4: write EXIF metadata from JSON sidecars into all media files
-python fix_metadata.py
+uv run python fix_metadata.py
 ```
 
+Steps 1 and 2 use `python3` directly — they only need the standard library. Steps 3 and 4 use `uv run` to ensure `timezonefinder` (in `.venv`) is available for DST-correct timezone lookups.
+
 Steps 1 and 4 are safe to re-run — already-extracted files are skipped, and exiftool is idempotent. Step 2 is also re-runnable: files already in a monthly folder won't be moved again (collision detection skips them).
+
 
 ---
 
