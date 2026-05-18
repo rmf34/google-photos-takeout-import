@@ -96,6 +96,24 @@ class TestGetMonth:
         json_set = {sc}
         assert sya.get_month(photo, json_set) == "2021-01"
 
+    def test_duplicate_naming_supplemental_metadata(self, tmp_path):
+        # STEM(N).EXT → STEM.EXT.supplemental-metadata(N).json
+        photo = tmp_path / "IMG_9171(1).JPG"
+        photo.write_bytes(b"fake")
+        sc = tmp_path / "IMG_9171.JPG.supplemental-metadata(1).json"
+        sc.write_text(json.dumps({"photoTakenTime": {"timestamp": "1609459200"}}))
+        json_set = {sc}
+        assert sya.get_month(photo, json_set) == "2021-01"
+
+    def test_duplicate_naming_suppl(self, tmp_path):
+        # Truncated variant: STEM.EXT.suppl(N).json
+        photo = tmp_path / "abc(1).jpg"
+        photo.write_bytes(b"fake")
+        sc = tmp_path / "abc.jpg.suppl(1).json"
+        sc.write_text(json.dumps({"photoTakenTime": {"timestamp": "1609459200"}}))
+        json_set = {sc}
+        assert sya.get_month(photo, json_set) == "2021-01"
+
 
 # ---------------------------------------------------------------------------
 # find_sidecars

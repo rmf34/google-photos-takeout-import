@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fix_metadata import PHOTOS_DIR, MEDIA_EXTS, SIDECAR_SUFFIXES
+from fix_metadata import PHOTOS_DIR, MEDIA_EXTS, SIDECAR_SUFFIXES, _DUPE_RE
 
 YEAR_RE = re.compile(r"^Photos from (\d{4})$")
 DRY_RUN = "--dry-run" in sys.argv
@@ -52,6 +52,17 @@ def _parse_month(sidecar: Path) -> str | None:
         return None
 
 
+def _dupe_candidates(name: str, parent: Path) -> list[Path]:
+    """For STEM(N).EXT, return candidate sidecar paths STEM.EXT.suffix_base(N).json."""
+    m = _DUPE_RE.match(name)
+    if not m:
+        return []
+    stem, dupe_n, ext = m.group(1), m.group(2), m.group(3)
+    base = stem + ext
+    return [parent / (base + suffix[: -len(".json")] + dupe_n + ".json")
+            for suffix in SIDECAR_SUFFIXES]
+
+
 def get_month(media_path: Path, json_set: set[Path]) -> str | None:
     """Return 'YYYY-MM' from the photo's sidecar. json_set is a pre-scanned set."""
     name = media_path.name
@@ -59,6 +70,11 @@ def get_month(media_path: Path, json_set: set[Path]) -> str | None:
 
     for suffix in SIDECAR_SUFFIXES:
         c = parent / (name + suffix)
+        if c in json_set:
+            return _parse_month(c)
+
+    # Handle Google Takeout duplicate naming: STEM(N).EXT → STEM.EXT.suffix_base(N).json
+    for c in _dupe_candidates(name, parent):
         if c in json_set:
             return _parse_month(c)
 
@@ -80,6 +96,12 @@ def find_sidecars(media_path: Path, json_set: set[Path]) -> list[Path]:
 
     for suffix in SIDECAR_SUFFIXES:
         c = parent / (name + suffix)
+        if c in json_set and c not in seen:
+            sidecars.append(c)
+            seen.add(c)
+
+    # Handle Google Takeout duplicate naming: STEM(N).EXT → STEM.EXT.suffix_base(N).json
+    for c in _dupe_candidates(name, parent):
         if c in json_set and c not in seen:
             sidecars.append(c)
             seen.add(c)

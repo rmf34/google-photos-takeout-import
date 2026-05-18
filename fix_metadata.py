@@ -22,6 +22,7 @@ files and are never touched by this script.
 Safe to re-run — exiftool is idempotent on already-correct files.
 """
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -51,6 +52,9 @@ SIDECAR_SUFFIXES = [
     ".sup.json",
     ".json",
 ]
+
+# Google Takeout duplicate naming: STEM(N).EXT → STEM.EXT.suffix_base(N).json
+_DUPE_RE = re.compile(r"^(.*?)(\(\d+\))(\.[^.]+)$")
 
 # Timezone finder — loaded once if available
 _tf = None
@@ -98,6 +102,17 @@ def find_sidecar(media_path: Path) -> Optional[Path]:
         c = parent / (name + suffix)
         if c.exists():
             return c
+
+    # Handle Google Takeout duplicate naming: STEM(N).EXT → STEM.EXT.suffix_base(N).json
+    m = _DUPE_RE.match(name)
+    if m:
+        stem, dupe_n, ext = m.group(1), m.group(2), m.group(3)
+        base = stem + ext
+        for suffix in SIDECAR_SUFFIXES:
+            suffix_base = suffix[: -len(".json")]
+            c = parent / (base + suffix_base + dupe_n + ".json")
+            if c.exists():
+                return c
 
     # Fuzzy: any .json starting with first 40 chars of filename
     # Handles unusual Google truncation lengths

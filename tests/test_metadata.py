@@ -70,6 +70,29 @@ class TestFindSidecar:
         sidecar.write_text("{}")
         assert find_sidecar(photo) == sidecar
 
+    def test_duplicate_naming_supplemental_metadata(self, tmp_path):
+        # Google Takeout duplicate: STEM(N).EXT → STEM.EXT.supplemental-metadata(N).json
+        photo = self._make_photo(tmp_path, "IMG_9171(1).JPG")
+        sidecar = tmp_path / "IMG_9171.JPG.supplemental-metadata(1).json"
+        sidecar.write_text("{}")
+        assert find_sidecar(photo) == sidecar
+
+    def test_duplicate_naming_suppl_truncated(self, tmp_path):
+        # Truncated variant: STEM.EXT.suppl(N).json
+        photo = self._make_photo(tmp_path, "abc(1).jpg")
+        sidecar = tmp_path / "abc.jpg.suppl(1).json"
+        sidecar.write_text("{}")
+        assert find_sidecar(photo) == sidecar
+
+    def test_duplicate_naming_prefers_full_over_truncated(self, tmp_path):
+        # When both full and truncated sidecars exist, prefer the full name
+        photo = self._make_photo(tmp_path, "IMG_9171(1).JPG")
+        full = tmp_path / "IMG_9171.JPG.supplemental-metadata(1).json"
+        trunc = tmp_path / "IMG_9171.JPG.suppl(1).json"
+        full.write_text("{}")
+        trunc.write_text("{}")
+        assert find_sidecar(photo) == full
+
 
 # ---------------------------------------------------------------------------
 # parse_sidecar
