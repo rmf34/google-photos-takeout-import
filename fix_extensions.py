@@ -27,7 +27,8 @@ DRY_RUN = "--dry-run" in sys.argv
 
 def _is_actually_jpeg(path: Path) -> bool:
     try:
-        return path.read_bytes()[:3] == JPEG_MAGIC
+        with open(path, "rb") as fh:
+            return fh.read(3) == JPEG_MAGIC
     except Exception:
         return False
 
@@ -55,6 +56,20 @@ def _find_all_sidecars(media_path: Path) -> list[Path]:
             if c.exists() and c not in seen:
                 sidecars.append(c)
                 seen.add(c)
+
+    # Fuzzy fallback for Google's unusual truncation lengths — same logic as
+    # find_sidecars() in split_year_albums.py. Only runs when direct+dupe found nothing
+    # to avoid O(n²) cost on large albums.
+    if not sidecars:
+        prefix = name[: min(len(name), 40)]
+        for candidate in parent.iterdir():
+            if (
+                candidate.suffix == ".json"
+                and candidate.name.startswith(prefix)
+                and candidate not in seen
+            ):
+                sidecars.append(candidate)
+                seen.add(candidate)
 
     return sidecars
 

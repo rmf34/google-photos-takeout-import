@@ -28,9 +28,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import IO, Optional
 
 DATA_DIR = Path("~/photos")
 PHOTOS_DIR = DATA_DIR / "staged" / "Takeout" / "Google Photos"
@@ -92,9 +93,6 @@ _DUPE_RE = re.compile(r"^(.*?)(\(\d+\))(\.[^.]+)$")
 
 # Timezone finder — loaded once if available
 _tf = None
-
-# Optional error log file handle — set by main() to capture exiftool error lines
-_error_log = None
 
 
 def _get_tz_finder():
@@ -294,7 +292,7 @@ def build_exiftool_entry(media_path: Path, metadata: dict) -> Optional[dict]:
     return entry if len(entry) > 1 else None
 
 
-def run_exiftool_batch(entries: list[dict]) -> tuple[int, int]:
+def run_exiftool_batch(entries: list[dict], error_log: "IO[str] | None" = None) -> tuple[int, int]:
     if not entries:
         return 0, 0
 
@@ -304,7 +302,7 @@ def run_exiftool_batch(entries: list[dict]) -> tuple[int, int]:
     if len(entries) > CHUNK:
         total_ok = total_err = 0
         for start in range(0, len(entries), CHUNK):
-            ok, err = run_exiftool_batch(entries[start : start + CHUNK])
+            ok, err = run_exiftool_batch(entries[start : start + CHUNK], error_log)
             total_ok += ok
             total_err += err
         return total_ok, total_err
@@ -329,8 +327,8 @@ def run_exiftool_batch(entries: list[dict]) -> tuple[int, int]:
                     updated += int(line.strip().split()[0])
                 except ValueError:
                     pass
-            elif line.startswith("Error:") and _error_log is not None:
-                _error_log.write(line + "\n")
+            elif line.startswith("Error:") and error_log is not None:
+                error_log.write(line + "\n")
         # Fall back to entry count minus errors if parsing fails
         if updated == 0 and result.returncode == 0:
             updated = len(entries)
@@ -416,47 +414,44 @@ def main():
     stats = {"ok": 0, "no_sidecar": 0, "bad_sidecar": 0, "exiftool_error": 0}
     prog = Progress(len(all_files))
 
-    global _error_log
     error_log_path = SCRIPT_DIR / "fix_metadata_errors.log"
-    _error_log = open(error_log_path, "w", encoding="utf-8")
 
-    # Process album by album so exiftool batches stay manageable
-    albums: dict[Path, list[Path]] = {}
-    for f in all_files:
-        albums.setdefault(f.parent, []).append(f)
+    with open(error_log_path, "w", encoding="utf-8") as error_log:
+        # Process album by album so exiftool batches stay manageable
+        albums: dict[Path, list[Path]] = {}
+        for f in all_files:
+            albums.setdefault(f.parent, []).append(f)
 
-    for album_dir, files in sorted(albums.items()):
-        album_name = album_dir.name
-        json_set = {f for f in album_dir.iterdir() if f.suffix == ".json"}
-        entries = []
+        for album_dir, files in sorted(albums.items()):
+            album_name = album_dir.name
+            json_set = {f for f in album_dir.iterdir() if f.suffix == ".json"}
+            entries = []
 
-        for f in files:
-            sidecar = find_sidecar(f, json_set)
-            if not sidecar:
-                stats["no_sidecar"] += 1
+            for f in files:
+                sidecar = find_sidecar(f, json_set)
+                if not sidecar:
+                    stats["no_sidecar"] += 1
+                    prog.update(album=album_name)
+                    continue
+
+                metadata = parse_sidecar(sidecar)
+                if not metadata:
+                    stats["bad_sidecar"] += 1
+                    prog.update(album=album_name)
+                    continue
+
+                entry = build_exiftool_entry(f, metadata)
+                if entry:
+                    entries.append(entry)
+                else:
+                    stats["no_sidecar"] += 1
                 prog.update(album=album_name)
-                continue
 
-            metadata = parse_sidecar(sidecar)
-            if not metadata:
-                stats["bad_sidecar"] += 1
-                prog.update(album=album_name)
-                continue
-
-            entry = build_exiftool_entry(f, metadata)
-            if entry:
-                entries.append(entry)
-            else:
-                stats["no_sidecar"] += 1
-            prog.update(album=album_name)
-
-        ok, err = run_exiftool_batch(entries)
-        stats["ok"] += ok
-        stats["exiftool_error"] += err
+            ok, err = run_exiftool_batch(entries, error_log)
+            stats["ok"] += ok
+            stats["exiftool_error"] += err
 
     prog.finish()
-    _error_log.close()
-    _error_log = None
 
     total = len(all_files)
     print(f"{'=' * 55}")
@@ -468,9 +463,6 @@ def main():
 
     if stats["exiftool_error"] > 0:
         print(f"\nError details: {error_log_path}")
-        # Summarise unique error prefixes so the user can see what's failing
-        from collections import Counter
-
         with open(error_log_path, encoding="utf-8") as lf:
             lines = lf.readlines()
         # Bucket by error type (first ~60 chars before the path)
