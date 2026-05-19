@@ -8,9 +8,11 @@ Migrate a Google Takeout photo archive to an existing Google Photos account.
 
 2. **`split_year_albums.py`** — `Photos from YEAR` directories can contain up to 58,000 files. Passing that many paths to exiftool in one call exceeds the kernel's `ARG_MAX` limit (~3.2 MB on this system) and crashes with `Argument list too long`. This script splits each year directory into `Photos from YYYY-MM` monthly sub-albums (≈2,000–5,000 files each) based on each photo's `photoTakenTime` sidecar timestamp. Handles Google's duplicate naming quirk (`STEM(N).EXT` → `STEM.EXT.supplemental-metadata(N).json`). Photos with no usable timestamp go into `Photos from YYYY-unknown`. Supports `--dry-run`.
 
-3. **`precheck.py`** — Sanity checks to run before touching EXIF: verifies exiftool is installed, staged directory exists, sidecar coverage ≥ 90%, ≥ 5 GB free, and runs a sample pipeline test on a real photo with GPS (shows before/after EXIF and verifies the written datetime matches the computed one).
+3. **`fix_extensions.py`** — Google Takeout exports some JPEGs with the wrong file extension (`.png`, `.heic`, `.webp`, `.gif`, `.avif`, etc.) because Google internally transcodes everything to JPEG but preserves the original filename. exiftool detects the mismatch and refuses to write metadata to those files. This script detects affected files by JPEG magic bytes (`\xff\xd8\xff`) and renames both the media file and its sidecar(s) to `.jpg`. Supports `--dry-run`.
 
-4. **`fix_metadata.py`** — Reads each photo's `.supplemental-metadata.json` sidecar and writes correct dates, GPS, and captions back into the file's EXIF using exiftool. See detailed sections below. Safe to re-run — exiftool is idempotent.
+4. **`precheck.py`** — Sanity checks to run before touching EXIF: verifies exiftool is installed, staged directory exists, sidecar coverage ≥ 90%, ≥ 5 GB free, and runs a sample pipeline test on a real photo with GPS (shows before/after EXIF and verifies the written datetime matches the computed one).
+
+5. **`fix_metadata.py`** — Reads each photo's `.supplemental-metadata.json` sidecar and writes correct dates, GPS, and captions back into the file's EXIF using exiftool. See detailed sections below. Safe to re-run — exiftool is idempotent.
 
 ## Data layout
 
@@ -43,7 +45,7 @@ To confirm everything is ready:
 ```bash
 exiftool -ver                             # should print a version number (e.g. 12.76)
 uv run python -c "import timezonefinder; print('ok')"
-uv run pytest -q                          # 85 tests, all should pass
+uv run pytest -q                          # 100 tests, all should pass
 ```
 
 ### Git hooks
@@ -66,16 +68,19 @@ python3 extract_and_stage.py
 # Step 2: split 'Photos from YEAR' into monthly sub-albums (required before fix_metadata)
 python3 split_year_albums.py
 
-# Step 3: sanity checks (exits 1 on failure — fix before proceeding)
+# Step 3: rename fake-extension JPEGs (Google exports some JPEGs as .png, .heic, etc.)
+python3 fix_extensions.py
+
+# Step 4: sanity checks (exits 1 on failure — fix before proceeding)
 uv run python precheck.py
 
-# Step 4: write EXIF metadata from JSON sidecars into all media files
+# Step 5: write EXIF metadata from JSON sidecars into all media files
 uv run python fix_metadata.py
 ```
 
-Steps 1 and 2 use `python3` directly — they only need the standard library. Steps 3 and 4 use `uv run` to ensure `timezonefinder` (in `.venv`) is available for DST-correct timezone lookups.
+Steps 1, 2, and 3 use `python3` directly — they only need the standard library. Steps 4 and 5 use `uv run` to ensure `timezonefinder` (in `.venv`) is available for DST-correct timezone lookups.
 
-Steps 1 and 4 are safe to re-run — already-extracted files are skipped, and exiftool is idempotent. Step 2 is also re-runnable: files already in a monthly folder won't be moved again (collision detection skips them).
+Steps 1, 3, and 5 are safe to re-run — already-extracted files are skipped, collisions are skipped, and exiftool is idempotent. Step 2 is also re-runnable: files already in a monthly folder won't be moved again.
 
 
 ---
@@ -207,6 +212,8 @@ Both `fix_metadata.py` and `split_year_albums.py` detect this pattern and match 
 The above variants are tried in order for every file. A fuzzy prefix match (first 40 characters of the filename) catches any remaining unusual truncation lengths.
 
 **Truncated + duplicate** — Both truncation and `(N)` duplication can occur on the same file, e.g. `photo(1).jpg` → `photo.jpg.suppl(1).json`. This is also handled.
+
+**Fake extensions** — Google internally transcodes many uploads to JPEG but preserves the original filename. A photo originally named `IMG_001.png` may be a valid JPEG inside, causing exiftool to reject it (`Not a valid PNG (looks more like a JPEG)`). `fix_extensions.py` detects these by checking the JPEG magic bytes (`\xff\xd8\xff`) and renames both the file and its sidecar to `.jpg` before `fix_metadata.py` runs.
 
 ---
 
