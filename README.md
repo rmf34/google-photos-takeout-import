@@ -14,6 +14,10 @@ Migrate a Google Takeout photo archive to an existing Google Photos account.
 
 5. **`fix_metadata.py`** — Reads each photo's `.supplemental-metadata.json` sidecar and writes correct dates, GPS, and captions back into the file's EXIF using exiftool. See detailed sections below. Safe to re-run — exiftool is idempotent.
 
+6. **`fix_missing_dates.py`** — Fixes media files still missing `DateTimeOriginal` after `fix_metadata.py`. Handles three categories: (a) `-edited` files (Google exports edits without sidecar JSON) — copies date from the non-edited original; (b) fake-extension JPEGs (`.png`/`.heic` that are actually JPEGs) — re-tags via temp-rename to bypass exiftool's extension check; (c) remaining files — derives date from `Photos from YYYY-MM` directory name. Generates `fixed_files.txt` listing all fixed files for selective re-upload. Supports `--dry-run`.
+
+7. **`reupload_fixed.py`** — Safely deletes wrong-date files from Google Photos albums and prepares for re-upload. Only touches files listed in `fixed_files.txt`, only in albums that match exactly by name, and only if the Google Photos date falls within the upload window (default: on or after 2026-05-18). Runs audit-first (no `--execute` = dry run). Writes `reupload_audit.log` before any deletion and `reupload_deletions.log` during execution. Batches deletions per album via `rclone delete --files-from-raw`.
+
 ## Data layout
 
 ```
@@ -45,7 +49,7 @@ To confirm everything is ready:
 ```bash
 exiftool -ver                             # should print a version number (e.g. 12.76)
 uv run python -c "import timezonefinder; print('ok')"
-uv run pytest -q                          # 100 tests, all should pass
+uv run pytest -q                          # 152 tests, all should pass
 ```
 
 ### Git hooks
@@ -76,11 +80,23 @@ uv run python precheck.py
 
 # Step 5: write EXIF metadata from JSON sidecars into all media files
 uv run python fix_metadata.py
+
+# Step 6: fix files missing dates (-edited files, fake-extension JPEGs)
+uv run python fix_missing_dates.py
+
+# Step 7: upload to Google Photos via rclone
+rclone copy "~/photos/staged/Takeout/Google Photos" \
+  "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \
+  --log-file rclone_upload.log --log-level NOTICE --progress
+
+# Step 8 (if needed): delete wrong-date uploads and re-upload fixed versions
+uv run python reupload_fixed.py               # audit only
+uv run python reupload_fixed.py --execute      # delete + re-upload
 ```
 
-Steps 1, 2, and 3 use `python3` directly — they only need the standard library. Steps 4 and 5 use `uv run` to ensure `timezonefinder` (in `.venv`) is available for DST-correct timezone lookups.
+Steps 1, 2, and 3 use `python3` directly — they only need the standard library. Steps 4-6 and 8 use `uv run` to ensure `timezonefinder` (in `.venv`) is available for DST-correct timezone lookups.
 
-Steps 1, 3, and 5 are safe to re-run — already-extracted files are skipped, collisions are skipped, and exiftool is idempotent. Step 2 is also re-runnable: files already in a monthly folder won't be moved again.
+Steps 1, 3, 5, and 6 are safe to re-run — already-extracted files are skipped, collisions are skipped, and exiftool is idempotent. Step 2 is also re-runnable: files already in a monthly folder won't be moved again. Step 8 is safe to re-run: it only deletes files within the upload date window and writes an audit log before any deletion.
 
 
 ---
@@ -217,6 +233,14 @@ The above variants are tried in order for every file. A fuzzy prefix match (firs
 
 ---
 
-## Step 5: Upload
+## Upload
 
-TODO — gphotos-uploader-cli OAuth setup and config.
+Upload uses `rclone` with the Google Photos backend. The `google-photos:album` remote maps each subdirectory in the staged Takeout to a Google Photos album.
+
+```bash
+rclone copy "~/photos/staged/Takeout/Google Photos" \
+  "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \
+  --log-file rclone_upload.log --log-level NOTICE --progress
+```
+
+The Google Photos API has a daily quota. If you hit `429 RESOURCE_EXHAUSTED`, wait until the quota resets (midnight Pacific) and re-run — rclone skips already-uploaded files.

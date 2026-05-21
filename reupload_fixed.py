@@ -18,8 +18,10 @@ Usage:
 """
 
 import argparse
+import os
 import re
 import subprocess
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +29,11 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 FIXED_LIST = SCRIPT_DIR / "fixed_files.txt"
 AUDIT_LOG = SCRIPT_DIR / "reupload_audit.log"
+DELETE_LOG = SCRIPT_DIR / "reupload_deletions.log"
 PHOTOS_DIR = Path("~/photos/staged/Takeout/Google Photos")
+
+SECONDS_PER_FILE = 5
+MIN_BATCH_TIMEOUT = 120
 
 
 def load_fixed_files() -> dict[str, set[str]]:
@@ -88,6 +94,52 @@ def get_gp_album_list() -> set[str]:
     return albums
 
 
+def build_delete_list(
+    fixed: dict[str, set[str]],
+    gp_albums: set[str],
+    upload_window_start: datetime,
+) -> tuple[list[tuple[str, str, datetime]], list[tuple[str, str, datetime, str]]]:
+    """Cross-reference fixed files with Google Photos and apply date-window safety.
+
+    Returns (to_delete, safe_skips).
+    """
+    target_albums = sorted(set(fixed.keys()) & gp_albums)
+    to_delete: list[tuple[str, str, datetime]] = []
+    safe_skips: list[tuple[str, str, datetime, str]] = []
+
+    for album in target_albums:
+        fixed_names = fixed[album]
+        print(f"  Scanning: {album} ({len(fixed_names)} fixed files)...", end=" ", flush=True)
+
+        gp_files = list_album_files(album)
+        gp_by_name = {name: dt for name, dt in gp_files}
+
+        matched = 0
+        for filename in sorted(fixed_names):
+            if filename not in gp_by_name:
+                continue
+
+            gp_date = gp_by_name[filename]
+            matched += 1
+
+            if gp_date >= upload_window_start:
+                to_delete.append((album, filename, gp_date))
+            else:
+                safe_skips.append(
+                    (
+                        album,
+                        filename,
+                        gp_date,
+                        f"GP date {gp_date:%Y-%m-%d} is before upload window",
+                    )
+                )
+
+        not_uploaded = len(fixed_names) - matched
+        print(f"{matched} in GP, {not_uploaded} not yet uploaded")
+
+    return to_delete, safe_skips
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Delete wrong-date files from Google Photos and re-upload."
@@ -132,45 +184,12 @@ def main():
     gp_albums = get_gp_album_list()
     print(f"Found {len(gp_albums)} albums in Google Photos\n")
 
-    # Cross-reference: only process albums that exist in both lists
-    target_albums = sorted(set(fixed.keys()) & gp_albums)
-    print(f"Albums to check: {len(target_albums)}")
+    # Cross-reference fixed files with Google Photos albums
+    target_count = len(set(fixed.keys()) & gp_albums)
+    print(f"Albums to check: {target_count}")
     print()
 
-    # Phase 1: Audit — list what would be deleted
-    to_delete: list[tuple[str, str, datetime]] = []  # (album, filename, gp_date)
-    safe_skips: list[tuple[str, str, datetime, str]] = []  # (album, filename, gp_date, reason)
-
-    for album in target_albums:
-        fixed_names = fixed[album]
-        print(f"  Scanning: {album} ({len(fixed_names)} fixed files)...", end=" ", flush=True)
-
-        gp_files = list_album_files(album)
-        gp_by_name = {name: dt for name, dt in gp_files}
-
-        matched = 0
-        for filename in sorted(fixed_names):
-            if filename not in gp_by_name:
-                continue  # Not uploaded yet — will get correct date on next upload
-
-            gp_date = gp_by_name[filename]
-            matched += 1
-
-            # Safety check: only delete if Google Photos date is in our upload window
-            if gp_date >= upload_window_start:
-                to_delete.append((album, filename, gp_date))
-            else:
-                safe_skips.append(
-                    (
-                        album,
-                        filename,
-                        gp_date,
-                        f"GP date {gp_date:%Y-%m-%d} is before upload window",
-                    )
-                )
-
-        not_uploaded = len(fixed_names) - matched
-        print(f"{matched} in GP, {not_uploaded} not yet uploaded")
+    to_delete, safe_skips = build_delete_list(fixed, gp_albums, upload_window_start)
 
     print()
     print("=" * 65)
@@ -229,29 +248,78 @@ def main():
     print(f"EXECUTING: Deleting {len(to_delete)} files from Google Photos albums...")
     print(f"{'=' * 65}\n")
 
-    deleted = 0
-    errors = 0
-    for i, (album, filename, gp_date) in enumerate(to_delete):
-        if i % 50 == 0 and i > 0:
-            print(f"  Progress: {i}/{len(to_delete)} ({deleted} deleted, {errors} errors)")
+    album_files: dict[str, list[str]] = defaultdict(list)
+    for album, filename, gp_date in to_delete:
+        album_files[album].append(filename)
 
-        try:
-            r = subprocess.run(
-                ["rclone", "deletefile", f"google-photos:album/{album}/{filename}"],
-                capture_output=True,
-                text=True,
-                timeout=30,
+    total_deleted = 0
+    total_errors = 0
+
+    with open(DELETE_LOG, "a", encoding="utf-8") as deletion_log:
+        deletion_log.write(f"\n{'=' * 65}\n")
+        deletion_log.write(f"Deletion run — {datetime.now():%Y-%m-%d %H:%M:%S}\n")
+        deletion_log.write(f"{'=' * 65}\n")
+
+        for album, filenames in sorted(album_files.items()):
+            print(f"  Deleting {len(filenames)} files from: {album}...", end=" ", flush=True)
+
+            timeout = max(MIN_BATCH_TIMEOUT, len(filenames) * SECONDS_PER_FILE)
+            fd, files_from_path = tempfile.mkstemp(
+                suffix=".txt", prefix=f"rclone_delete_{os.getpid()}_"
             )
-            if r.returncode == 0:
-                deleted += 1
-            else:
-                print(f"  ERROR deleting {album}/{filename}: {r.stderr.strip()}")
-                errors += 1
-        except subprocess.TimeoutExpired:
-            print(f"  TIMEOUT deleting {album}/{filename}")
-            errors += 1
+            try:
+                with os.fdopen(fd, "w") as fh:
+                    fh.write("\n".join(filenames) + "\n")
 
-    print(f"\nDeletion complete: {deleted} deleted, {errors} errors")
+                r = subprocess.run(
+                    [
+                        "rclone",
+                        "delete",
+                        f"google-photos:album/{album}",
+                        "--files-from-raw",
+                        files_from_path,
+                        "--verbose",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+
+                output = r.stdout + "\n" + r.stderr
+                deleted_in_batch = sum(1 for line in output.splitlines() if ": Deleted" in line)
+                errors_in_batch = sum(
+                    1 for line in output.splitlines() if line.startswith("ERROR :")
+                )
+
+                if deleted_in_batch > 0 or errors_in_batch > 0:
+                    total_deleted += deleted_in_batch
+                    total_errors += errors_in_batch
+                elif r.returncode == 0:
+                    total_deleted += len(filenames)
+                else:
+                    total_errors += len(filenames)
+
+                if errors_in_batch > 0 or r.returncode != 0:
+                    print(f"{deleted_in_batch} deleted, {errors_in_batch} errors")
+                    deletion_log.write(f"\nERRORS in {album}:\n{output}\n")
+                else:
+                    print(f"OK ({deleted_in_batch or len(filenames)})")
+
+                deletion_log.write(
+                    f"  {album}: {deleted_in_batch or len(filenames)} deleted,"
+                    f" {errors_in_batch} errors\n"
+                )
+
+            except subprocess.TimeoutExpired:
+                print(f"TIMEOUT ({timeout}s)")
+                total_errors += len(filenames)
+                deletion_log.write(f"  {album}: TIMEOUT after {timeout}s\n")
+            finally:
+                Path(files_from_path).unlink(missing_ok=True)
+
+    print(f"\nDeletion complete: {total_deleted} deleted, {total_errors} errors")
+    if DELETE_LOG.exists() and DELETE_LOG.stat().st_size > 0:
+        print(f"Deletion log: {DELETE_LOG}")
 
     print(f"\n{'=' * 65}")
     print("Phase 2 complete. Now re-run the rclone upload to re-upload fixed files:")
