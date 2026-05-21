@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import reupload_fixed as rf
@@ -148,12 +150,29 @@ class TestGetGpAlbumList:
 
         assert albums == {"Assorted Family Pictures", "Photos from 2017-03", "Le Maouts"}
 
-    def test_empty_list(self):
+    def test_empty_list_exits_with_error(self):
         mock_result = MagicMock(stdout="", stderr="", returncode=0)
-        with patch("reupload_fixed.subprocess.run", return_value=mock_result):
-            albums = rf.get_gp_album_list()
+        with (
+            patch("reupload_fixed.subprocess.run", return_value=mock_result),
+            pytest.raises(SystemExit),
+        ):
+            rf.get_gp_album_list()
 
-        assert albums == set()
+    def test_rclone_error_exits(self):
+        mock_result = MagicMock(stdout="", stderr="ERROR : quota exceeded", returncode=1)
+        with (
+            patch("reupload_fixed.subprocess.run", return_value=mock_result),
+            pytest.raises(SystemExit),
+        ):
+            rf.get_gp_album_list()
+
+    def test_stderr_error_with_zero_returncode_exits(self):
+        mock_result = MagicMock(stdout="", stderr="ERROR : partial failure", returncode=0)
+        with (
+            patch("reupload_fixed.subprocess.run", return_value=mock_result),
+            pytest.raises(SystemExit),
+        ):
+            rf.get_gp_album_list()
 
     def test_skips_short_lines(self):
         stdout = "bad\n          -1 2026-05-20 16:40:31       140 Valid Album\n"
@@ -170,6 +189,16 @@ class TestGetGpAlbumList:
             albums = rf.get_gp_album_list()
 
         assert "Album Name With (Special Characters" in albums
+
+    def test_timeout_exits_with_error(self):
+        with (
+            patch(
+                "reupload_fixed.subprocess.run",
+                side_effect=subprocess.TimeoutExpired("rclone", 120),
+            ),
+            pytest.raises(SystemExit),
+        ):
+            rf.get_gp_album_list()
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ PHOTOS_DIR = Path("~/photos/staged/Takeout/Google Photos")
 
 SECONDS_PER_FILE = 5
 MIN_BATCH_TIMEOUT = 120
+RCLONE_LIST_TIMEOUT = 120
 
 
 def load_fixed_files() -> dict[str, set[str]]:
@@ -56,7 +57,7 @@ def list_album_files(album: str) -> list[tuple[str, datetime]]:
             ["rclone", "lsl", f"google-photos:album/{album}"],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=RCLONE_LIST_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
         print(f"  TIMEOUT listing album: {album}")
@@ -78,12 +79,21 @@ def list_album_files(album: str) -> list[tuple[str, datetime]]:
 
 def get_gp_album_list() -> set[str]:
     """Get set of all album names in Google Photos."""
-    r = subprocess.run(
-        ["rclone", "lsd", "google-photos:album"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    try:
+        r = subprocess.run(
+            ["rclone", "lsd", "google-photos:album"],
+            capture_output=True,
+            text=True,
+            timeout=RCLONE_LIST_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        print("ERROR: Timed out listing Google Photos albums — API may be quota-throttled.")
+        raise SystemExit(1)
+
+    if r.returncode != 0 or "error" in r.stderr.lower():
+        print(f"ERROR: rclone lsd failed (rc={r.returncode}): {r.stderr.strip()}")
+        raise SystemExit(1)
+
     albums = set()
     for line in r.stdout.strip().splitlines():
         # Format: "          -1 2026-05-20 16:40:31       140 Album Name Here"
@@ -91,6 +101,12 @@ def get_gp_album_list() -> set[str]:
         parts = line.split(None, 4)
         if len(parts) >= 5:
             albums.add(parts[4])
+
+    if not albums:
+        print("ERROR: Google Photos returned 0 albums — API is likely quota-throttled.")
+        print("Wait for quota reset (midnight Pacific) and retry.")
+        raise SystemExit(1)
+
     return albums
 
 

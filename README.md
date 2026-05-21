@@ -49,7 +49,7 @@ To confirm everything is ready:
 ```bash
 exiftool -ver                             # should print a version number (e.g. 12.76)
 uv run python -c "import timezonefinder; print('ok')"
-uv run pytest -q                          # 152 tests, all should pass
+uv run pytest -q                          # 155 tests, all should pass
 ```
 
 ### Git hooks
