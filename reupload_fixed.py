@@ -32,8 +32,9 @@ AUDIT_LOG = SCRIPT_DIR / "reupload_audit.log"
 DELETE_LOG = SCRIPT_DIR / "reupload_deletions.log"
 PHOTOS_DIR = Path("~/photos/staged/Takeout/Google Photos")
 
-SECONDS_PER_FILE = 5
+SECONDS_PER_FILE = 15
 MIN_BATCH_TIMEOUT = 120
+RCLONE_DELETE_TPS = 2
 RCLONE_LIST_TIMEOUT = 120
 
 
@@ -294,6 +295,7 @@ def main():
                         f"google-photos:album/{album}",
                         "--files-from-raw",
                         files_from_path,
+                        f"--tpslimit={RCLONE_DELETE_TPS}",
                         "--verbose",
                     ],
                     capture_output=True,
