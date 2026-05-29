@@ -6,3 +6,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 fix_metadata_errors.log
+fixed_files.txt
+rclone_upload.log
+reupload_audit.log
+reupload_deletions.log

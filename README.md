@@ -26,7 +26,7 @@ Migrate a Google Takeout photo archive to an existing Google Photos account.
   staged/             ← extracted output lands here
 ```
 
-Code lives in `~/portainer/google-photos-takeout-import/`.
+Pass `--data-dir ~/photos` to each script, or set `export TAKEOUT_DATA_DIR=~/photos` once in your shell.
 
 ## Setup
 
@@ -85,7 +85,7 @@ uv run python fix_metadata.py
 uv run python fix_missing_dates.py
 
 # Step 7: upload to Google Photos via rclone
-rclone copy "~/photos/staged/Takeout/Google Photos" \
+rclone copy "$TAKEOUT_DATA_DIR/staged/Takeout/Google Photos" \
   "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \
   --log-file rclone_upload.log --log-level NOTICE --progress
 
@@ -238,7 +238,7 @@ The above variants are tried in order for every file. A fuzzy prefix match (firs
 Upload uses `rclone` with the Google Photos backend. The `google-photos:album` remote maps each subdirectory in the staged Takeout to a Google Photos album.
 
 ```bash
-rclone copy "~/photos/staged/Takeout/Google Photos" \
+rclone copy "$TAKEOUT_DATA_DIR/staged/Takeout/Google Photos" \
   "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \
   --log-file rclone_upload.log --log-level NOTICE --progress
 ```

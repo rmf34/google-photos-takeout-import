@@ -69,32 +69,29 @@ class TestExtractZipCounts:
             entries[f"{self.ALBUM_PATH}IMG_{i:04d}.jpg.supplemental-metadata.json"] = b"{}"
         return entries
 
-    def test_fresh_extraction_counts(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("extract_and_stage.STAGE_DIR", tmp_path)
+    def test_fresh_extraction_counts(self, tmp_path):
         zip_path = make_zip(tmp_path / "test.zip", self._entries(n=3))
 
-        extracted, already_existed, total = extract_zip(zip_path, 1, 1)
+        extracted, already_existed, total = extract_zip(zip_path, 1, 1, tmp_path)
 
         assert extracted == 6  # 3 images + 3 sidecars
         assert already_existed == 0
         assert total == 6  # directory entries excluded from total
         assert extracted + already_existed == total
 
-    def test_rerun_counts_as_already_existed(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("extract_and_stage.STAGE_DIR", tmp_path)
+    def test_rerun_counts_as_already_existed(self, tmp_path):
         zip_path = make_zip(tmp_path / "test.zip", self._entries(n=3))
 
-        extract_zip(zip_path, 1, 1)  # first pass
+        extract_zip(zip_path, 1, 1, tmp_path)  # first pass
         # Re-create zip (it wasn't deleted in test — no main() call)
         zip_path = make_zip(tmp_path / "test.zip", self._entries(n=3))
-        extracted, already_existed, total = extract_zip(zip_path, 1, 1)
+        extracted, already_existed, total = extract_zip(zip_path, 1, 1, tmp_path)
 
         assert extracted == 0
         assert already_existed == 6
         assert extracted + already_existed == total
 
-    def test_partial_extraction_count_still_accurate(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("extract_and_stage.STAGE_DIR", tmp_path)
+    def test_partial_extraction_count_still_accurate(self, tmp_path):
         # Pre-place 2 of the 6 files to simulate a partial prior run
         for i in range(2):
             dest = tmp_path / self.ALBUM_PATH / f"IMG_{i:04d}.jpg"
@@ -102,20 +99,19 @@ class TestExtractZipCounts:
             dest.write_bytes(b"fake image")
 
         zip_path = make_zip(tmp_path / "test.zip", self._entries(n=3))
-        extracted, already_existed, total = extract_zip(zip_path, 1, 1)
+        extracted, already_existed, total = extract_zip(zip_path, 1, 1, tmp_path)
 
         assert already_existed == 2
         assert extracted == 4  # remaining 1 image + 3 sidecars
         assert extracted + already_existed == total
 
-    def test_directory_entries_excluded_from_total(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("extract_and_stage.STAGE_DIR", tmp_path)
+    def test_directory_entries_excluded_from_total(self, tmp_path):
         entries = {
             "Takeout/Google Photos/Album/": b"",  # dir — should not count
             "Takeout/Google Photos/Album/photo.jpg": b"x",
         }
         zip_path = make_zip(tmp_path / "test.zip", entries)
-        extracted, already_existed, total = extract_zip(zip_path, 1, 1)
+        extracted, already_existed, total = extract_zip(zip_path, 1, 1, tmp_path)
 
         assert total == 1
         assert extracted == 1

@@ -22,7 +22,9 @@ files and are never touched by this script.
 Safe to re-run — exiftool is idempotent on already-correct files.
 """
 
+import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -33,9 +35,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Optional
 
-DATA_DIR = Path("~/photos")
-PHOTOS_DIR = DATA_DIR / "staged" / "Takeout" / "Google Photos"
 SCRIPT_DIR = Path(__file__).parent
+PHOTOS_DIR = (
+    Path(os.environ.get("TAKEOUT_DATA_DIR") or ".") / "staged" / "Takeout" / "Google Photos"
+)
 
 MEDIA_EXTS = {
     ".jpg",
@@ -392,8 +395,20 @@ def collect_media_files(photos_dir: Path) -> list[Path]:
 
 
 def main():
-    if not PHOTOS_DIR.exists():
-        print(f"ERROR: {PHOTOS_DIR} not found. Run extract_and_stage.py first.")
+    parser = argparse.ArgumentParser(
+        description="Write EXIF metadata from Google Takeout JSON sidecars."
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path(os.environ.get("TAKEOUT_DATA_DIR") or "."),
+        help="Root data directory containing staged/Takeout/Google Photos (env: TAKEOUT_DATA_DIR)",
+    )
+    args = parser.parse_args()
+    photos_dir = args.data_dir / "staged" / "Takeout" / "Google Photos"
+
+    if not photos_dir.exists():
+        print(f"ERROR: {photos_dir} not found. Run extract_and_stage.py first.")
         sys.exit(1)
 
     try:
@@ -409,8 +424,8 @@ def main():
         print("⚠  timezonefinder not found — dates will be written in UTC")
         print("   (dates will be correct; clock time may be off by your UTC offset)")
 
-    print(f"\nScanning {PHOTOS_DIR} ...")
-    all_files = collect_media_files(PHOTOS_DIR)
+    print(f"\nScanning {photos_dir} ...")
+    all_files = collect_media_files(photos_dir)
     print(f"Found {len(all_files):,} media files\n")
 
     stats = {"ok": 0, "no_sidecar": 0, "bad_sidecar": 0, "exiftool_error": 0}

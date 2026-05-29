@@ -30,8 +30,6 @@ SCRIPT_DIR = Path(__file__).parent
 FIXED_LIST = SCRIPT_DIR / "fixed_files.txt"
 AUDIT_LOG = SCRIPT_DIR / "reupload_audit.log"
 DELETE_LOG = SCRIPT_DIR / "reupload_deletions.log"
-PHOTOS_DIR = Path("~/photos/staged/Takeout/Google Photos")
-
 SECONDS_PER_FILE = 15
 MIN_BATCH_TIMEOUT = 120
 RCLONE_DELETE_TPS = 2
@@ -169,6 +167,15 @@ def parse_args() -> argparse.Namespace:
         type=str,
         required=True,
         help="Only delete files with a Google Photos date on or after this date (YYYY-MM-DD). Set to your rclone upload start date to avoid touching pre-existing photos.",
+    )
+    parser.add_argument(
+        "--photos-dir",
+        type=Path,
+        default=Path(os.environ.get("TAKEOUT_DATA_DIR") or ".")
+        / "staged"
+        / "Takeout"
+        / "Google Photos",
+        help="Path to Google Photos staged directory (env: TAKEOUT_DATA_DIR)",
     )
     return parser.parse_args()
 
@@ -342,7 +349,7 @@ def main():
     print(f"\n{'=' * 65}")
     print("Phase 2 complete. Now re-run the rclone upload to re-upload fixed files:")
     print()
-    print('rclone copy "~/photos/staged/Takeout/Google Photos" \\')
+    print(f'rclone copy "{args.photos_dir}" \\')
     print('  "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \\')
     print("  --log-file rclone_upload.log --log-level NOTICE --progress")
     print(f"{'=' * 65}")

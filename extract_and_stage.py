@@ -11,16 +11,14 @@ when uploading — those photos go into the library unsorted, which is correct
 since they weren't in any named album originally.
 """
 
+import argparse
+import os
 import re
 import shutil
 import sys
 import time
 import zipfile
 from pathlib import Path
-
-DATA_DIR = Path("~/photos")
-RAW_DIR = DATA_DIR / "raw_from_drive"
-STAGE_DIR = DATA_DIR / "staged"
 
 YEAR_ALBUM = re.compile(r"^Photos from \d{4}$")
 
@@ -71,7 +69,9 @@ class Progress:
         )
 
 
-def extract_zip(zip_path: Path, zip_num: int, zip_total: int) -> tuple[int, int, int]:
+def extract_zip(
+    zip_path: Path, zip_num: int, zip_total: int, stage_dir: Path
+) -> tuple[int, int, int]:
     """Extract one ZIP. Returns (extracted, already_existed, total_files)."""
     extracted = already_existed = 0
     prog = Progress(f"[{zip_num}/{zip_total}] {zip_path.name}")
@@ -82,7 +82,7 @@ def extract_zip(zip_path: Path, zip_num: int, zip_total: int) -> tuple[int, int,
 
         for member in members:
             name = member.filename
-            target = STAGE_DIR / name
+            target = stage_dir / name
 
             if target.exists():
                 already_existed += 1
@@ -101,11 +101,25 @@ def extract_zip(zip_path: Path, zip_num: int, zip_total: int) -> tuple[int, int,
 
 
 def main():
-    STAGE_DIR.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(
+        description="Extract Google Takeout ZIPs to staging directory."
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path(os.environ.get("TAKEOUT_DATA_DIR") or "."),
+        help="Root data directory containing raw_from_drive/ and staged/ (env: TAKEOUT_DATA_DIR)",
+    )
+    args = parser.parse_args()
+    data_dir = args.data_dir
+    raw_dir = data_dir / "raw_from_drive"
+    stage_dir = data_dir / "staged"
 
-    zips = sorted(RAW_DIR.glob("takeout-*.zip"))
+    stage_dir.mkdir(parents=True, exist_ok=True)
+
+    zips = sorted(raw_dir.glob("takeout-*.zip"))
     if not zips:
-        print("No ZIP files found in", RAW_DIR)
+        print("No ZIP files found in", raw_dir)
         sys.exit(1)
 
     print(f"Found {len(zips)} ZIP files to extract\n")
@@ -117,7 +131,7 @@ def main():
 
     for i, zip_path in enumerate(zips, 1):
         try:
-            extracted, already_existed, total = extract_zip(zip_path, i, len(zips))
+            extracted, already_existed, total = extract_zip(zip_path, i, len(zips), stage_dir)
             total_extracted += extracted
             total_skipped += already_existed
 
@@ -139,7 +153,7 @@ def main():
     print(f"\nDone in {elapsed / 60:.1f} min")
     print(f"  Total extracted    : {total_extracted:,}")
     print(f"  Total already had  : {total_skipped:,}")
-    print(f"  Staged at          : {STAGE_DIR / 'Takeout' / 'Google Photos'}")
+    print(f"  Staged at          : {stage_dir / 'Takeout' / 'Google Photos'}")
 
     if kept:
         print(f"\n  ⚠️  {len(kept)} ZIP(s) kept due to unaccounted files:")
