@@ -168,15 +168,6 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Only delete files with a Google Photos date on or after this date (YYYY-MM-DD). Set to your rclone upload start date to avoid touching pre-existing photos.",
     )
-    parser.add_argument(
-        "--photos-dir",
-        type=Path,
-        default=Path(os.environ.get("TAKEOUT_DATA_DIR") or ".")
-        / "staged"
-        / "Takeout"
-        / "Google Photos",
-        help="Path to Google Photos staged directory (env: TAKEOUT_DATA_DIR)",
-    )
     return parser.parse_args()
 
 
@@ -349,7 +340,11 @@ def main():
     print(f"\n{'=' * 65}")
     print("Phase 2 complete. Now re-run the rclone upload to re-upload fixed files:")
     print()
-    print(f'rclone copy "{args.photos_dir}" \\')
+    # This path is hint-only — deletion happens via the rclone Google Photos API.
+    upload_src = (
+        Path(os.environ.get("TAKEOUT_DATA_DIR") or ".") / "staged" / "Takeout" / "Google Photos"
+    )
+    print(f'rclone copy "{upload_src}" \\')
     print('  "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \\')
     print("  --log-file rclone_upload.log --log-level NOTICE --progress")
     print(f"{'=' * 65}")

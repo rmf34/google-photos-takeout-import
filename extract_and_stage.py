@@ -111,7 +111,7 @@ def main():
         help="Root data directory containing raw_from_drive/ and staged/ (env: TAKEOUT_DATA_DIR)",
     )
     args = parser.parse_args()
-    data_dir = args.data_dir
+    data_dir = args.data_dir.expanduser()
     raw_dir = data_dir / "raw_from_drive"
     stage_dir = data_dir / "staged"
 

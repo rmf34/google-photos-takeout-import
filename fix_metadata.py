@@ -405,7 +405,14 @@ def main():
         help="Root data directory containing staged/Takeout/Google Photos (env: TAKEOUT_DATA_DIR)",
     )
     args = parser.parse_args()
-    photos_dir = args.data_dir / "staged" / "Takeout" / "Google Photos"
+    photos_dir = args.data_dir.expanduser() / "staged" / "Takeout" / "Google Photos"
+
+    if photos_dir != PHOTOS_DIR:
+        print(
+            f"WARNING: --data-dir points to {photos_dir}\n"
+            f"         but TAKEOUT_DATA_DIR-based PHOTOS_DIR is {PHOTOS_DIR}.\n"
+            f"         Standalone scripts (split_year_albums.py etc.) will use the env var path."
+        )
 
     if not photos_dir.exists():
         print(f"ERROR: {photos_dir} not found. Run extract_and_stage.py first.")

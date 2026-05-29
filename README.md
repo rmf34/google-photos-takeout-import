@@ -65,38 +65,74 @@ If ruff auto-fixes files on commit, it will abort the commit and show the change
 
 ## Usage
 
+### Quick start
+
 ```bash
-# Step 1: extract all ZIPs (deletes each ZIP after successful extraction)
-python3 extract_and_stage.py
+export TAKEOUT_DATA_DIR=~/photos   # directory with raw_from_drive/ and staged/
+uv run python run.py
+```
 
-# Step 2: split 'Photos from YEAR' into monthly sub-albums (required before fix_metadata)
-python3 split_year_albums.py
+`run.py` prompts you to choose a mode:
 
-# Step 3: rename fake-extension JPEGs (Google exports some JPEGs as .png, .heic, etc.)
-python3 fix_extensions.py
+```
+What would you like to do?
+  1. Fix metadata in a Google Takeout download
+  2. Fix metadata + upload to Google Photos
 
-# Step 4: sanity checks (exits 1 on failure — fix before proceeding)
-uv run python precheck.py
+Choice [1/2]:
+```
 
-# Step 5: write EXIF metadata from JSON sidecars into all media files
-uv run python fix_metadata.py
+Or skip the prompt with `--mode`:
 
-# Step 6: fix files missing dates (-edited files, fake-extension JPEGs)
-uv run python fix_missing_dates.py
+```bash
+uv run python run.py --mode local                # fix metadata only
+uv run python run.py --mode upload               # fix metadata + upload to Google Photos
+uv run python run.py --data-dir ~/photos --mode local   # override data dir inline
+```
 
-# Step 7: upload to Google Photos via rclone
-rclone copy "$TAKEOUT_DATA_DIR/staged/Takeout/Google Photos" \
-  "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \
-  --log-file rclone_upload.log --log-level NOTICE --progress
+Both modes run these steps in order, stopping on any failure:
 
-# Step 8 (if needed): delete wrong-date uploads and re-upload fixed versions
+| Step | Script | What it does |
+|---|---|---|
+| 1 | `extract_and_stage.py` | Extract Takeout ZIPs; delete each after success |
+| 2 | `split_year_albums.py` | Split "Photos from YEAR" folders into monthly sub-albums |
+| 3 | `fix_extensions.py` | Rename fake-extension JPEGs (Google exports some as .png, .heic, etc.) |
+| 4 | `precheck.py` | Sanity checks — exits non-zero on failure |
+| 5 | `fix_metadata.py` | Write EXIF dates, GPS, and captions from JSON sidecars |
+| 6 | `fix_missing_dates.py` | Fix files still missing `DateTimeOriginal` after step 5 |
+| 7 _(upload only)_ | rclone | Upload staged files to Google Photos |
+
+All steps are safe to re-run — already-extracted files are skipped, collisions are skipped, and exiftool is idempotent.
+
+### Re-upload wrong-date files (if needed)
+
+If some files landed in Google Photos with incorrect dates after upload, fix and re-upload them:
+
+```bash
 uv run python reupload_fixed.py               # audit only
 uv run python reupload_fixed.py --execute      # delete + re-upload
 ```
 
-Steps 1, 2, and 3 use `python3` directly — they only need the standard library. Steps 4-6 and 8 use `uv run` to ensure `timezonefinder` (in `.venv`) is available for DST-correct timezone lookups.
+### Running steps individually
 
-Steps 1, 3, 5, and 6 are safe to re-run — already-extracted files are skipped, collisions are skipped, and exiftool is idempotent. Step 2 is also re-runnable: files already in a monthly folder won't be moved again. Step 8 is safe to re-run: it only deletes files within the upload date window and writes an audit log before any deletion.
+Each script can also be run standalone if you need to re-run a single step:
+
+```bash
+# Steps 1-3: stdlib only
+python3 extract_and_stage.py --data-dir ~/photos
+python3 split_year_albums.py
+python3 fix_extensions.py
+
+# Steps 4-6: need the venv (uv run ensures it)
+uv run python precheck.py
+uv run python fix_metadata.py --data-dir ~/photos
+uv run python fix_missing_dates.py
+
+# Upload manually
+rclone copy "$TAKEOUT_DATA_DIR/staged/Takeout/Google Photos" \
+  "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \
+  --log-file rclone_upload.log --log-level NOTICE --progress
+```
 
 
 ---
