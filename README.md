@@ -49,8 +49,18 @@ To confirm everything is ready:
 ```bash
 exiftool -ver                             # should print a version number (e.g. 12.76)
 uv run python -c "import timezonefinder; print('ok')"
-uv run pytest -q                          # 155 tests, all should pass
+uv run pytest -q                          # all tests should pass
 ```
+
+### Running tests
+
+```bash
+uv run pytest -q                                        # all tests (unit + integration)
+uv run pytest tests/test_metadata.py -q                 # unit tests only (no exiftool needed)
+uv run pytest tests/test_exiftool_integration.py -v     # integration tests (requires exiftool)
+```
+
+Integration tests in `tests/test_exiftool_integration.py` call real exiftool and are skipped automatically if it is not installed. They verify that `run_exiftool_batch` correctly writes EXIF tags to real JPEG and PNG files.
 
 ### Git hooks
 
