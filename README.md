@@ -97,10 +97,13 @@ Or skip the prompt with `--mode`:
 ```bash
 uv run python run.py --mode local                # fix metadata only
 uv run python run.py --mode upload               # fix metadata + upload to Google Photos
+uv run python run.py --mode upload-only          # skip metadata steps, upload only (use after quota reset)
 uv run python run.py --data-dir ~/photos --mode local   # override data dir inline
 ```
 
-Both modes run these steps in order, stopping on any failure:
+`upload-only` is the right command for day 2+: metadata is already fixed, the upload just needs to resume. It prints current progress (files uploaded vs total) before starting rclone.
+
+`upload` and `upload-only` run these steps in order, stopping on any failure:
 
 | Step | Script | What it does |
 |---|---|---|
@@ -281,12 +284,35 @@ The above variants are tried in order for every file. A fuzzy prefix match (firs
 
 ## Upload
 
-Upload uses `rclone` with the Google Photos backend. The `google-photos:album` remote maps each subdirectory in the staged Takeout to a Google Photos album.
+Upload uses `rclone` with the Google Photos backend. The `google-photos:album` remote maps each subdirectory in the staged Takeout to a Google Photos album. Run via `run.py` rather than rclone directly so failures are diagnosed automatically:
+
+```bash
+uv run python run.py --mode upload-only   # resume upload (metadata already fixed)
+uv run python run.py --mode upload        # fix metadata + upload (first run)
+```
+
+On failure, `run.py` tails `rclone_upload.log` and surfaces the root cause:
+
+- **Token expired** — `rclone config reconnect google-photos:` then re-run
+- **Quota exceeded** — wait until midnight Pacific and re-run
+
+rclone skips already-uploaded files, so re-running is always safe.
+
+### Concurrency and rate-limiting
+
+The upload runs **4 parallel transfers** (`--transfers 4`) capped at **3 API requests per second** (`--tpslimit 3`). These are the defaults baked into `run.py`.
+
+The Google Photos API enforces a daily quota (~10,000 requests/day on the free tier). For a large library this can take several weeks of daily re-runs. Tuning options:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--transfers N` | 4 | Parallel file uploads. Higher values don't help much — the bottleneck is the API quota, not throughput. |
+| `--tpslimit N` | 3 | Max API requests per second. Reducing this (e.g. `--tpslimit 1`) can prevent mid-session 429 errors but doesn't increase the daily quota. |
+
+To override, run rclone directly:
 
 ```bash
 rclone copy "$TAKEOUT_DATA_DIR/staged/Takeout/Google Photos" \
   "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \
   --log-file rclone_upload.log --log-level NOTICE --progress
 ```
-
-The Google Photos API has a daily quota. If you hit `429 RESOURCE_EXHAUSTED`, wait until the quota resets (midnight Pacific) and re-run — rclone skips already-uploaded files.
