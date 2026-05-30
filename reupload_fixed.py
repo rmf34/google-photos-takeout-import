@@ -12,9 +12,12 @@ Safety measures:
   - Phase 1 (audit) runs first; Phase 2 (delete) requires --execute flag
 
 Usage:
-    uv run python reupload_fixed.py                          # audit only
-    uv run python reupload_fixed.py --execute                # delete + re-upload
-    uv run python reupload_fixed.py --since YYYY-MM-DD       # custom window start
+    uv run python reupload_fixed.py --since YYYY-MM-DD           # audit only
+    uv run python reupload_fixed.py --since YYYY-MM-DD --execute # delete + re-upload
+
+--since is the date you started your rclone upload. Only files with a Google Photos
+date on or after that date will be touched — this prevents accidentally deleting
+photos that were already in your library before the upload.
 """
 
 import argparse
