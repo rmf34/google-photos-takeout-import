@@ -89,6 +89,11 @@ def get_gp_album_list() -> set[str]:
         print("ERROR: Timed out listing Google Photos albums — API may be quota-throttled.")
         raise SystemExit(1)
 
+    if "invalid_grant" in r.stderr or "token expired" in r.stderr.lower():
+        print("ERROR: rclone Google Photos token has expired.")
+        print("Re-authenticate with:  rclone config reconnect google-photos:")
+        raise SystemExit(1)
+
     if r.returncode != 0 or "error" in r.stderr.lower():
         print(f"ERROR: rclone lsd failed (rc={r.returncode}): {r.stderr.strip()}")
         raise SystemExit(1)
