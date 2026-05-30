@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import enum
 import math
 import os
 import re
@@ -25,8 +26,11 @@ SCRIPT_DIR = Path(__file__).parent
 DAILY_QUOTA = 10_000  # Google Photos API (Application Programming Interface) files/day limit
 RCLONE_PROGRESS_INTERVAL = 5  # seconds between progress line updates and rclone stats logging
 RCLONE_LIST_TIMEOUT = 120  # seconds to wait for rclone lsd before giving up
+QUOTA_RETRY_INTERVAL = 3600  # seconds to wait between quota-exhausted retries
 PROGRESS_LINE_WIDTH = 100  # terminal width for \r-overwritten progress line
 TAIL_BYTES = 16_384  # max bytes read from log tail — covers ~150 lines regardless of file age
+
+_QUOTA_ERROR_MARKERS = ("Quota exceeded", "RESOURCE_EXHAUSTED")
 
 # Scripts that only need stdlib are run with sys.executable directly.
 # Scripts that need the venv (exiftool wrappers, timezonefinder) use uv run.
@@ -48,6 +52,24 @@ class UploadProgress:
     gp_initial: int | None  # files in Google Photos before this session; None when fetch failed
     local_total: int  # total local non-JSON files to upload
     avg_bytes: float  # average bytes per file (for gigabyte estimate)
+
+
+class _UploadResult(enum.Enum):
+    OK = enum.auto()
+    QUOTA_EXHAUSTED = enum.auto()
+    FAILED = enum.auto()
+
+
+def _is_quota_error(log_path: Path) -> bool:
+    try:
+        tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
+    except OSError:
+        print(
+            f"\n  WARNING: could not read {log_path} to classify failure — treating as hard error."
+        )
+        return False
+    combined = "\n".join(tail)
+    return any(marker in combined for marker in _QUOTA_ERROR_MARKERS)
 
 
 def _header(text: str) -> None:
@@ -80,7 +102,7 @@ def _diagnose_rclone_failure() -> None:
     if "invalid_grant" in combined or "token expired" in combined.lower():
         print("\nDIAGNOSIS: rclone OAuth (Open Authorization) token has expired.")
         print("Fix:  rclone config reconnect google-photos:")
-    elif "Quota exceeded" in combined or "RESOURCE_EXHAUSTED" in combined:
+    elif any(marker in combined for marker in _QUOTA_ERROR_MARKERS):
         print(
             "\nDIAGNOSIS: Google Photos daily API (Application Programming Interface) quota exceeded."
         )
@@ -234,7 +256,9 @@ def _print_upload_progress(
     print()
 
 
-def _run_rclone(label: str, cmd: list[str], env: dict[str, str], progress: UploadProgress) -> bool:
+def _run_rclone(
+    label: str, cmd: list[str], env: dict[str, str], progress: UploadProgress
+) -> _UploadResult:
     _header(f"Step: {label}")
     log_path = SCRIPT_DIR / "rclone_upload.log"
     proc = subprocess.Popen(cmd, env=env)
@@ -251,11 +275,13 @@ def _run_rclone(label: str, cmd: list[str], env: dict[str, str], progress: Uploa
     line = _format_progress_line(progress, log_path)
     print(f"\r{line:<{PROGRESS_LINE_WIDTH}}")
 
-    if proc.returncode != 0:
-        print(f"\nERROR: '{label}' failed (exit {proc.returncode}). Stopping.")
-        _diagnose_rclone_failure()
-        return False
-    return True
+    if proc.returncode == 0:
+        return _UploadResult.OK
+    if _is_quota_error(log_path):
+        return _UploadResult.QUOTA_EXHAUSTED
+    print(f"\nERROR: '{label}' failed (exit {proc.returncode}). Stopping.")
+    _diagnose_rclone_failure()
+    return _UploadResult.FAILED
 
 
 def _prompt_mode() -> str:
@@ -331,9 +357,35 @@ def main() -> None:
             "NOTICE",
             "--stats",
             f"{RCLONE_PROGRESS_INTERVAL}s",
+            "--stats-log-level",
+            "NOTICE",
         ]
-        if not _run_rclone("Upload to Google Photos (rclone)", rclone_cmd, env, progress):
-            sys.exit(1)
+        quota_attempt = 0
+        while True:
+            result = _run_rclone("Upload to Google Photos (rclone)", rclone_cmd, env, progress)
+            if result == _UploadResult.OK:
+                break
+            if result == _UploadResult.FAILED:
+                sys.exit(1)
+            # Quota exhausted — wait QUOTA_RETRY_INTERVAL then retry
+            quota_attempt += 1
+            wait_m = QUOTA_RETRY_INTERVAL // 60
+            print(f"\n  Quota exhausted (attempt {quota_attempt}). Retrying in {wait_m}m...")
+            deadline = time.monotonic() + QUOTA_RETRY_INTERVAL
+            while True:
+                remaining = max(0, int(deadline - time.monotonic()))
+                if remaining == 0:
+                    break
+                rm = remaining // 60
+                print(f"\r  Retrying in {rm}m...{' ' * 10}", end="", flush=True)
+                time.sleep(min(60, remaining))
+            print(f"\r  Re-fetching stats and retrying...{' ' * 20}")
+            local_total, local_bytes, gp_initial = _fetch_upload_stats(photos_dir)
+            avg_bytes = local_bytes / local_total if local_total else 0
+            _print_upload_progress(local_total, local_bytes, avg_bytes, gp_initial)
+            progress = UploadProgress(
+                gp_initial=gp_initial, local_total=local_total, avg_bytes=avg_bytes
+            )
 
     _header("All steps complete")
     if mode == "local":
