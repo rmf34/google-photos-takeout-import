@@ -119,7 +119,11 @@ def main():
 
     zips = sorted(raw_dir.glob("takeout-*.zip"))
     if not zips:
-        print("No ZIP files found in", raw_dir)
+        if any(stage_dir.iterdir()) if stage_dir.exists() else False:
+            print("No ZIP files found in", raw_dir, "— skipping (already extracted)")
+            sys.exit(0)
+        print(f"No ZIP files found in {raw_dir} and staged directory is empty.")
+        print("Check your --data-dir setting.")
         sys.exit(1)
 
     print(f"Found {len(zips)} ZIP files to extract\n")
