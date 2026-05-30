@@ -11,12 +11,22 @@ Usage:
 """
 
 import argparse
+import math
 import os
+import re
 import subprocess
 import sys
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
+
+DAILY_QUOTA = 10_000  # Google Photos API (Application Programming Interface) files/day limit
+RCLONE_PROGRESS_INTERVAL = 5  # seconds between progress line updates and rclone stats logging
+RCLONE_LIST_TIMEOUT = 120  # seconds to wait for rclone lsd before giving up
+PROGRESS_LINE_WIDTH = 100  # terminal width for \r-overwritten progress line
+TAIL_BYTES = 16_384  # max bytes read from log tail — covers ~150 lines regardless of file age
 
 # Scripts that only need stdlib are run with sys.executable directly.
 # Scripts that need the venv (exiftool wrappers, timezonefinder) use uv run.
@@ -31,6 +41,13 @@ LOCAL_STEPS = [
     ("Fix metadata (EXIF)", _UV, "fix_metadata.py"),
     ("Fix missing dates", _UV, "fix_missing_dates.py"),
 ]
+
+
+@dataclass(frozen=True)
+class UploadProgress:
+    gp_initial: int | None  # files in Google Photos before this session; None when fetch failed
+    local_total: int  # total local non-JSON files to upload
+    avg_bytes: float  # average bytes per file (for gigabyte estimate)
 
 
 def _header(text: str) -> None:
@@ -61,18 +78,28 @@ def _diagnose_rclone_failure() -> None:
         return
     combined = "\n".join(tail)
     if "invalid_grant" in combined or "token expired" in combined.lower():
-        print("\nDIAGNOSIS: rclone OAuth token has expired.")
+        print("\nDIAGNOSIS: rclone OAuth (Open Authorization) token has expired.")
         print("Fix:  rclone config reconnect google-photos:")
     elif "Quota exceeded" in combined or "RESOURCE_EXHAUSTED" in combined:
-        print("\nDIAGNOSIS: Google Photos daily API quota exceeded.")
+        print(
+            "\nDIAGNOSIS: Google Photos daily API (Application Programming Interface) quota exceeded."
+        )
         print("Fix:  wait until midnight Pacific and re-run.")
 
 
-def _count_local_files(photos_dir: Path) -> int:
-    total = 0
-    for _, _, files in os.walk(photos_dir):
-        total += sum(1 for f in files if not f.lower().endswith(".json"))
-    return total
+def _count_local_files(photos_dir: Path) -> tuple[int, int]:
+    """Return (file_count, total_bytes) for all non-JSON files."""
+    count = 0
+    total_bytes = 0
+    for dirpath, _, files in os.walk(photos_dir):
+        for f in files:
+            if not f.lower().endswith(".json"):
+                count += 1
+                try:
+                    total_bytes += Path(dirpath, f).stat().st_size
+                except OSError:
+                    pass
+    return count, total_bytes
 
 
 def _parse_gp_file_count(lsd_stdout: str) -> int:
@@ -90,25 +117,145 @@ def _parse_gp_file_count(lsd_stdout: str) -> int:
     return total
 
 
-def _print_upload_progress(photos_dir: Path) -> None:
-    local_total = _count_local_files(photos_dir)
-    print(f"\n  Local files to upload : {local_total:,}")
+def _parse_rclone_stats(log_path: Path) -> tuple[int, float]:
+    """Return (files_transferred_this_session, speed_kib_s) from latest rclone log stats."""
+    try:
+        with log_path.open("rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - TAIL_BYTES))
+            lines = fh.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return 0, 0.0
+
+    files_transferred = 0
+    speed_kib_s = 0.0
+    for line in reversed(lines):
+        if not files_transferred:
+            # "Transferred:            34 / 1314, 6%" — integer file-count stats line
+            m = re.search(r"Transferred:\s+(\d[\d,]*)\s*/\s*[\d,]+,\s*\d+%\s*$", line)
+            if m:
+                files_transferred = int(m.group(1).replace(",", ""))
+        if not speed_kib_s:
+            m = re.search(r"([\d.]+)\s*(KiB|MiB|GiB)/s", line)
+            if m:
+                val = float(m.group(1))
+                mult = {"KiB": 1.0, "MiB": 1024.0, "GiB": 1024.0**2}[m.group(2)]
+                speed_kib_s = val * mult
+        if files_transferred and speed_kib_s:
+            break
+    return files_transferred, speed_kib_s
+
+
+def _compute_remaining_stats(remaining: int, avg_bytes: float) -> tuple[float, int]:
+    """Pure function: return (remaining_gb, days_remaining) from file count and average size."""
+    remaining_gb = remaining * avg_bytes / (1024**3)
+    days_remaining = math.ceil(remaining / DAILY_QUOTA) if remaining > 0 else 0
+    return remaining_gb, days_remaining
+
+
+def _compute_progress_line(
+    gp_initial: int | None,
+    files_this_session: int,
+    local_total: int,
+    avg_bytes: float,
+    speed_kib_s: float,
+) -> str:
+    """Pure function: compute all progress metrics and return a formatted line."""
+    if speed_kib_s >= 1024:
+        speed_str = f"{speed_kib_s / 1024:.1f} MiB/s"
+    elif speed_kib_s > 0:
+        speed_str = f"{speed_kib_s:.0f} KiB/s"
+    else:
+        speed_str = "starting..."
+
+    if gp_initial is None:
+        # Baseline unknown — show session-only count without misleading totals
+        return f"  +{files_this_session:,} this session / {local_total:,} total  {speed_str}"
+
+    uploaded = gp_initial + files_this_session
+    remaining = max(0, local_total - uploaded)
+    pct = uploaded / local_total * 100 if local_total else 0
+    remaining_gb, days_remaining = _compute_remaining_stats(remaining, avg_bytes)
+
+    return (
+        f"  {uploaded:,}/{local_total:,} ({pct:.0f}%)  "
+        f"{remaining:,} left  ~{remaining_gb:.1f} GB  "
+        f"{speed_str}  ≥{days_remaining} days"
+    )
+
+
+def _format_progress_line(progress: UploadProgress, log_path: Path) -> str:
+    """Orchestrator: read log stats, then compute formatted progress line."""
+    files_this_session, speed_kib_s = _parse_rclone_stats(log_path)
+    return _compute_progress_line(
+        progress.gp_initial,
+        files_this_session,
+        progress.local_total,
+        progress.avg_bytes,
+        speed_kib_s,
+    )
+
+
+def _fetch_upload_stats(photos_dir: Path) -> tuple[int, int, int | None]:
+    """Return (local_total, local_bytes, gp_initial) without printing.
+
+    gp_initial is None when the Google Photos album count could not be fetched.
+    """
+    local_total, local_bytes = _count_local_files(photos_dir)
 
     result = subprocess.run(
         ["rclone", "lsd", "google-photos:album"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=RCLONE_LIST_TIMEOUT,
     )
     if result.returncode != 0 or not result.stdout.strip():
-        print("  Google Photos count  : (unavailable)")
-        return
+        return local_total, local_bytes, None
 
-    gp_total = _parse_gp_file_count(result.stdout)
-    pct = gp_total / local_total * 100 if local_total else 0
-    remaining = max(0, local_total - gp_total)
-    print(f"  Uploaded so far      : {gp_total:,} / {local_total:,} ({pct:.0f}%)")
-    print(f"  Remaining            : {remaining:,} files")
+    gp_initial = _parse_gp_file_count(result.stdout)
+    return local_total, local_bytes, gp_initial
+
+
+def _print_upload_progress(
+    local_total: int, local_bytes: int, avg_bytes: float, gp_initial: int | None
+) -> None:
+    """Print the pre-session snapshot. avg_bytes must be pre-computed by the caller."""
+    total_gb = local_bytes / (1024**3)
+    print(f"\n  Local files          : {local_total:,}  ({total_gb:.1f} GB total)")
+    if gp_initial is None:
+        print("  Google Photos count  : (unavailable)")
+    else:
+        remaining = max(0, local_total - gp_initial)
+        pct = gp_initial / local_total * 100 if local_total else 0
+        remaining_gb, days_remaining = _compute_remaining_stats(remaining, avg_bytes)
+        print(f"  Uploaded             : {gp_initial:,} / {local_total:,} ({pct:.0f}%)")
+        print(f"  Remaining            : {remaining:,} files  ~{remaining_gb:.1f} GB")
+        print(f"  Days remaining (min) : {days_remaining}  (quota: ~{DAILY_QUOTA:,} files/day)")
+    print()
+
+
+def _run_rclone(label: str, cmd: list[str], env: dict[str, str], progress: UploadProgress) -> bool:
+    _header(f"Step: {label}")
+    log_path = SCRIPT_DIR / "rclone_upload.log"
+    proc = subprocess.Popen(cmd, env=env)
+
+    last_update = time.monotonic() - RCLONE_PROGRESS_INTERVAL  # show on first tick
+
+    while proc.poll() is None:
+        if time.monotonic() - last_update >= RCLONE_PROGRESS_INTERVAL:
+            last_update = time.monotonic()
+            line = _format_progress_line(progress, log_path)
+            print(f"\r{line:<{PROGRESS_LINE_WIDTH}}", end="", flush=True)
+        time.sleep(1)
+
+    line = _format_progress_line(progress, log_path)
+    print(f"\r{line:<{PROGRESS_LINE_WIDTH}}")
+
+    if proc.returncode != 0:
+        print(f"\nERROR: '{label}' failed (exit {proc.returncode}). Stopping.")
+        _diagnose_rclone_failure()
+        return False
+    return True
 
 
 def _prompt_mode() -> str:
@@ -160,7 +307,13 @@ def main() -> None:
 
     if mode in ("upload", "upload-only"):
         photos_dir = data_dir / "staged" / "Takeout" / "Google Photos"
-        _print_upload_progress(photos_dir)
+        print("\n  Counting local files...")
+        local_total, local_bytes, gp_initial = _fetch_upload_stats(photos_dir)
+        avg_bytes = local_bytes / local_total if local_total else 0
+        _print_upload_progress(local_total, local_bytes, avg_bytes, gp_initial)
+        progress = UploadProgress(
+            gp_initial=gp_initial, local_total=local_total, avg_bytes=avg_bytes
+        )
         rclone_cmd = [
             "rclone",
             "copy",
@@ -176,9 +329,10 @@ def main() -> None:
             "rclone_upload.log",
             "--log-level",
             "NOTICE",
-            "--progress",
+            "--stats",
+            f"{RCLONE_PROGRESS_INTERVAL}s",
         ]
-        if not _run_step("Upload to Google Photos (rclone)", rclone_cmd, env, diagnose=True):
+        if not _run_rclone("Upload to Google Photos (rclone)", rclone_cmd, env, progress):
             sys.exit(1)
 
     _header("All steps complete")

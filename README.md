@@ -16,7 +16,7 @@ Migrate a Google Takeout photo archive to an existing Google Photos account.
 
 6. **`fix_missing_dates.py`** — Fixes media files still missing `DateTimeOriginal` after `fix_metadata.py`. Handles three categories: (a) `-edited` files (Google exports edits without sidecar JSON) — copies date from the non-edited original; (b) fake-extension JPEGs (`.png`/`.heic` that are actually JPEGs) — re-tags via temp-rename to bypass exiftool's extension check; (c) remaining files — derives date from `Photos from YYYY-MM` directory name. Generates `fixed_files.txt` listing all fixed files for selective re-upload. Supports `--dry-run`.
 
-7. **`reupload_fixed.py`** — Safely deletes wrong-date files from Google Photos albums and prepares for re-upload. Only touches files listed in `fixed_files.txt`, only in albums that match exactly by name, and only if the Google Photos date falls within the upload window (default: on or after 2026-05-18). Runs audit-first (no `--execute` = dry run). Writes `reupload_audit.log` before any deletion and `reupload_deletions.log` during execution. Batches deletions per album via `rclone delete --files-from-raw`.
+7. **`reupload_fixed.py`** — Safely deletes wrong-date files from Google Photos albums and prepares for re-upload. Only touches files listed in `fixed_files.txt`, only in albums that match exactly by name, and only if the Google Photos date falls within the upload window (`--since` is required — set it to your rclone upload start date to avoid touching pre-existing photos). Runs audit-first (no `--execute` = dry run). Writes `reupload_audit.log` before any deletion and `reupload_deletions.log` during execution. Batches deletions per album via `rclone delete --files-from-raw`.
 
 ## Data layout
 
@@ -122,9 +122,11 @@ All steps are safe to re-run — already-extracted files are skipped, collisions
 If some files landed in Google Photos with incorrect dates after upload, fix and re-upload them:
 
 ```bash
-uv run python reupload_fixed.py               # audit only
-uv run python reupload_fixed.py --execute      # delete + re-upload
+uv run python reupload_fixed.py --since YYYY-MM-DD               # audit only
+uv run python reupload_fixed.py --since YYYY-MM-DD --execute     # delete + re-upload
 ```
+
+Replace `YYYY-MM-DD` with the date you started your rclone upload (e.g. `2024-03-15`). Only photos with a Google Photos date on or after that date will be considered for deletion.
 
 ### Running steps individually
 
@@ -141,10 +143,10 @@ uv run python precheck.py
 uv run python fix_metadata.py --data-dir ~/photos
 uv run python fix_missing_dates.py
 
-# Upload manually
+# Upload manually (shows rclone's session-only progress, not the overall count run.py shows)
 rclone copy "$TAKEOUT_DATA_DIR/staged/Takeout/Google Photos" \
   "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \
-  --log-file rclone_upload.log --log-level NOTICE --progress
+  --log-file rclone_upload.log --log-level NOTICE --stats 30s
 ```
 
 
@@ -296,7 +298,13 @@ On failure, `run.py` tails `rclone_upload.log` and surfaces the root cause:
 - **Token expired** — `rclone config reconnect google-photos:` then re-run
 - **Quota exceeded** — wait until midnight Pacific and re-run
 
-rclone skips already-uploaded files, so re-running is always safe.
+rclone skips already-uploaded files, so re-running is always safe. While uploading, `run.py` shows a live progress line every few seconds:
+
+```
+  12,450/50,000 (25%)  37,550 left  ~28.4 GB  46 KiB/s  ≥4 days
+```
+
+The file count combines the pre-session snapshot with transfers logged in `rclone_upload.log`. The days estimate is `remaining ÷ 10,000` (the daily API (Application Programming Interface) quota).
 
 ### Concurrency and rate-limiting
 
@@ -309,10 +317,10 @@ The Google Photos API enforces a daily quota (~10,000 requests/day on the free t
 | `--transfers N` | 4 | Parallel file uploads. Higher values don't help much — the bottleneck is the API quota, not throughput. |
 | `--tpslimit N` | 3 | Max API requests per second. Reducing this (e.g. `--tpslimit 1`) can prevent mid-session 429 errors but doesn't increase the daily quota. |
 
-To override, run rclone directly:
+To override, run rclone directly (note: this shows rclone's session-only file count, not the overall count that `run.py` computes):
 
 ```bash
 rclone copy "$TAKEOUT_DATA_DIR/staged/Takeout/Google Photos" \
   "google-photos:album" --transfers 4 --tpslimit 3 --exclude "*.json" \
-  --log-file rclone_upload.log --log-level NOTICE --progress
+  --log-file rclone_upload.log --log-level NOTICE --stats 30s
 ```
