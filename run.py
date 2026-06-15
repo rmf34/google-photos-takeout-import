@@ -30,6 +30,8 @@ QUOTA_RETRY_INTERVAL = 3600  # seconds to wait between quota-exhausted retries
 PROGRESS_LINE_WIDTH = 100  # terminal width for \r-overwritten progress line
 TAIL_BYTES = 16_384  # max bytes read from log tail — covers ~150 lines regardless of file age
 
+DATELESS_REPORT = SCRIPT_DIR / "dateless_skipped.txt"
+_DATELESS_EXCLUDE = SCRIPT_DIR / "dateless_exclude.txt"
 _QUOTA_ERROR_MARKERS = ("Quota exceeded", "RESOURCE_EXHAUSTED")
 
 # Scripts that only need stdlib are run with sys.executable directly.
@@ -70,6 +72,47 @@ def _is_quota_error(log_path: Path) -> bool:
         return False
     combined = "\n".join(tail)
     return any(marker in combined for marker in _QUOTA_ERROR_MARKERS)
+
+
+def _find_bad_date_files(photos_dir: Path) -> list[Path]:
+    """Return photo paths with no EXIF date or an EXIF date after today.
+
+    Both conditions produce wrong dates in Google Photos: missing dates get
+    stamped with the upload date; future dates are nonsense from failed metadata
+    fixups (e.g. sidecar not matched after extension conversion).
+    """
+    if not photos_dir.is_dir():
+        print(f"\n  WARNING: photos directory not found: {photos_dir} — skipping date scan.")
+        return []
+    today = time.strftime("%Y:%m:%d 23:59:59")
+    result = subprocess.run(
+        [
+            "exiftool",
+            "-r",
+            "-p",
+            "$Directory/$FileName",
+            "-if",
+            (
+                "(not $DateTimeOriginal and not $CreateDate) or "
+                f"($DateTimeOriginal and $DateTimeOriginal gt '{today}') or "
+                f"($CreateDate and $CreateDate gt '{today}')"
+            ),
+            str(photos_dir),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(
+            f"\n  ERROR: exiftool date scan failed (exit {result.returncode}). "
+            "Cannot safely upload without validating dates — stopping."
+        )
+        sys.exit(1)
+    return [
+        Path(line.strip())
+        for line in result.stdout.splitlines()
+        if line.strip() and not line.strip().lower().endswith(".json")
+    ]
 
 
 def _header(text: str) -> None:
@@ -139,12 +182,13 @@ def _parse_gp_file_count(lsd_stdout: str) -> int:
     return total
 
 
-def _parse_rclone_stats(log_path: Path) -> tuple[int, float]:
+def _parse_rclone_stats(log_path: Path, log_offset: int) -> tuple[int, float]:
     """Return (files_transferred_this_session, speed_kib_s) from latest rclone log stats."""
     try:
         with log_path.open("rb") as fh:
             fh.seek(0, 2)
-            fh.seek(max(0, fh.tell() - TAIL_BYTES))
+            end = fh.tell()
+            fh.seek(max(log_offset, end - TAIL_BYTES))
             lines = fh.read().decode("utf-8", errors="replace").splitlines()
     except OSError:
         return 0, 0.0
@@ -206,9 +250,9 @@ def _compute_progress_line(
     )
 
 
-def _format_progress_line(progress: UploadProgress, log_path: Path) -> str:
+def _format_progress_line(progress: UploadProgress, log_path: Path, log_offset: int) -> str:
     """Orchestrator: read log stats, then compute formatted progress line."""
-    files_this_session, speed_kib_s = _parse_rclone_stats(log_path)
+    files_this_session, speed_kib_s = _parse_rclone_stats(log_path, log_offset)
     return _compute_progress_line(
         progress.gp_initial,
         files_this_session,
@@ -261,6 +305,10 @@ def _run_rclone(
 ) -> _UploadResult:
     _header(f"Step: {label}")
     log_path = SCRIPT_DIR / "rclone_upload.log"
+    try:
+        log_offset = log_path.stat().st_size
+    except OSError:
+        log_offset = 0
     proc = subprocess.Popen(cmd, env=env)
 
     last_update = time.monotonic() - RCLONE_PROGRESS_INTERVAL  # show on first tick
@@ -268,11 +316,11 @@ def _run_rclone(
     while proc.poll() is None:
         if time.monotonic() - last_update >= RCLONE_PROGRESS_INTERVAL:
             last_update = time.monotonic()
-            line = _format_progress_line(progress, log_path)
+            line = _format_progress_line(progress, log_path, log_offset)
             print(f"\r{line:<{PROGRESS_LINE_WIDTH}}", end="", flush=True)
         time.sleep(1)
 
-    line = _format_progress_line(progress, log_path)
+    line = _format_progress_line(progress, log_path, log_offset)
     print(f"\r{line:<{PROGRESS_LINE_WIDTH}}")
 
     if proc.returncode == 0:
@@ -340,6 +388,40 @@ def main() -> None:
         progress = UploadProgress(
             gp_initial=gp_initial, local_total=local_total, avg_bytes=avg_bytes
         )
+        if mode == "upload" or not DATELESS_REPORT.exists():
+            print("  Scanning for missing or future EXIF dates...")
+            bad_files = _find_bad_date_files(photos_dir)
+            if bad_files:
+                DATELESS_REPORT.write_text(
+                    "\n".join(str(p) for p in bad_files) + "\n", encoding="utf-8"
+                )
+                _DATELESS_EXCLUDE.write_text(
+                    "\n".join(str(p.relative_to(photos_dir)) for p in bad_files) + "\n",
+                    encoding="utf-8",
+                )
+                print(
+                    f"  {len(bad_files):,} files skipped (bad/missing date) — "
+                    f"paths written to {DATELESS_REPORT.name}"
+                )
+            else:
+                print("  All files have valid EXIF dates.")
+                DATELESS_REPORT.unlink(missing_ok=True)
+                _DATELESS_EXCLUDE.unlink(missing_ok=True)
+        else:
+            bad_files = [
+                Path(line.strip())
+                for line in DATELESS_REPORT.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            if bad_files and not _DATELESS_EXCLUDE.exists():
+                _DATELESS_EXCLUDE.write_text(
+                    "\n".join(str(p.relative_to(photos_dir)) for p in bad_files) + "\n",
+                    encoding="utf-8",
+                )
+            print(
+                f"  Reusing date scan: {len(bad_files):,} files to skip "
+                f"(run --mode upload to re-scan)"
+            )
         rclone_cmd = [
             "rclone",
             "copy",
@@ -360,6 +442,8 @@ def main() -> None:
             "--stats-log-level",
             "NOTICE",
         ]
+        if bad_files:
+            rclone_cmd += ["--exclude-from", str(_DATELESS_EXCLUDE)]
         quota_attempt = 0
         while True:
             result = _run_rclone("Upload to Google Photos (rclone)", rclone_cmd, env, progress)
