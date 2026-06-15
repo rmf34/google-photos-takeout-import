@@ -102,12 +102,23 @@ def _find_bad_date_files(photos_dir: Path) -> list[Path]:
         capture_output=True,
         text=True,
     )
-    if result.returncode != 0:
+    if result.returncode >= 2:
         print(
             f"\n  ERROR: exiftool date scan failed (exit {result.returncode}). "
             "Cannot safely upload without validating dates — stopping."
         )
         sys.exit(1)
+    if result.returncode == 1:
+        print(
+            "\n  WARNING: exiftool exited 1 — date scan may be incomplete; "
+            "some files were not validated."
+        )
+        if result.stderr.strip():
+            stderr_lines = result.stderr.strip().splitlines()
+            for line in stderr_lines[:10]:
+                print(f"    {line}")
+            if len(stderr_lines) > 10:
+                print(f"    ... and {len(stderr_lines) - 10} more lines.")
     return [
         Path(line.strip())
         for line in result.stdout.splitlines()
