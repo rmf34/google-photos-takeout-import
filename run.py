@@ -62,16 +62,24 @@ class _UploadResult(enum.Enum):
     FAILED = enum.auto()
 
 
-def _is_quota_error(log_path: Path) -> bool:
+def _read_log_since(log_path: Path, log_offset: int) -> str | None:
+    """Return log content from log_offset to end, or None on read error."""
     try:
-        tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
+        with log_path.open("rb") as fh:
+            fh.seek(log_offset)
+            return fh.read().decode("utf-8", errors="replace")
     except OSError:
+        return None
+
+
+def _is_quota_error(log_path: Path, log_offset: int) -> bool:
+    content = _read_log_since(log_path, log_offset)
+    if content is None:
         print(
             f"\n  WARNING: could not read {log_path} to classify failure — treating as hard error."
         )
         return False
-    combined = "\n".join(tail)
-    return any(marker in combined for marker in _QUOTA_ERROR_MARKERS)
+    return any(marker in content for marker in _QUOTA_ERROR_MARKERS)
 
 
 def _find_bad_date_files(photos_dir: Path) -> list[Path]:
@@ -133,30 +141,26 @@ def _header(text: str) -> None:
     print(bar)
 
 
-def _run_step(label: str, cmd: list[str], env: dict[str, str], diagnose: bool = False) -> bool:
+def _run_step(label: str, cmd: list[str], env: dict[str, str]) -> bool:
     _header(f"Step: {label}")
     result = subprocess.run(cmd, env=env)
     if result.returncode != 0:
         print(f"\nERROR: '{label}' failed (exit {result.returncode}). Stopping.")
-        if diagnose:
-            _diagnose_rclone_failure()
         return False
     return True
 
 
-def _diagnose_rclone_failure() -> None:
+def _diagnose_rclone_failure(log_offset: int) -> None:
     log = SCRIPT_DIR / "rclone_upload.log"
     if not log.exists():
         return
-    try:
-        tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
-    except OSError:
+    content = _read_log_since(log, log_offset)
+    if content is None:
         return
-    combined = "\n".join(tail)
-    if "invalid_grant" in combined or "token expired" in combined.lower():
+    if "invalid_grant" in content or "token expired" in content.lower():
         print("\nDIAGNOSIS: rclone OAuth (Open Authorization) token has expired.")
         print("Fix:  rclone config reconnect google-photos:")
-    elif any(marker in combined for marker in _QUOTA_ERROR_MARKERS):
+    elif any(marker in content for marker in _QUOTA_ERROR_MARKERS):
         print(
             "\nDIAGNOSIS: Google Photos daily API (Application Programming Interface) quota exceeded."
         )
@@ -336,10 +340,10 @@ def _run_rclone(
 
     if proc.returncode == 0:
         return _UploadResult.OK
-    if _is_quota_error(log_path):
+    if _is_quota_error(log_path, log_offset):
         return _UploadResult.QUOTA_EXHAUSTED
     print(f"\nERROR: '{label}' failed (exit {proc.returncode}). Stopping.")
-    _diagnose_rclone_failure()
+    _diagnose_rclone_failure(log_offset)
     return _UploadResult.FAILED
 
 
