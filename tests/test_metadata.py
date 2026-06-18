@@ -54,6 +54,14 @@ class TestFindSidecar:
         truncated.write_text("{}")
         assert find_sidecar(photo) == full
 
+    def test_prefers_supplemental_metadata_over_supplemental_json(self, tmp_path):
+        photo = self._make_photo(tmp_path)
+        full = tmp_path / "IMG_1234.jpg.supplemental-metadata.json"
+        variant = tmp_path / "IMG_1234.jpg.supplemental.json"
+        full.write_text("{}")
+        variant.write_text("{}")
+        assert find_sidecar(photo) == full
+
     def test_no_sidecar_returns_none(self, tmp_path):
         photo = self._make_photo(tmp_path)
         assert find_sidecar(photo) is None
@@ -63,6 +71,13 @@ class TestFindSidecar:
         other_sidecar = tmp_path / "IMG_5678.jpg.supplemental-metadata.json"
         other_sidecar.write_text("{}")
         assert find_sidecar(photo) is None
+
+    def test_supplemental_json_sidecar(self, tmp_path):
+        # Google Takeout variant: .supplemental.json (without -metadata)
+        photo = self._make_photo(tmp_path)
+        sidecar = tmp_path / "IMG_1234.jpg.supplemental.json"
+        sidecar.write_text("{}")
+        assert find_sidecar(photo) == sidecar
 
     def test_long_hash_filename_fuzzy_match(self, tmp_path):
         # Simulates Google's hash-named files with unusual truncation

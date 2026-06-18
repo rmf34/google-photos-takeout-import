@@ -84,6 +84,7 @@ VIDEO_EXTS = {
 
 SIDECAR_SUFFIXES = [
     ".supplemental-metadata.json",
+    ".supplemental.json",
     ".supple.json",
     ".suppl.json",
     ".supp.json",

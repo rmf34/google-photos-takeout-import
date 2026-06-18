@@ -83,6 +83,15 @@ class TestFindAllSidecars:
         assert len(result) == 1
         assert result[0].name == "photo.png.supplemental-metadata(1).json"
 
+    def test_finds_supplemental_json_sidecar(self, tmp_path):
+        # .supplemental.json is a real Google Takeout variant; now in SIDECAR_SUFFIXES
+        # for direct lookup. The fuzzy fallback is the safety net if it were ever removed.
+        self._make(tmp_path, "photo.heic", JPEG_MAGIC)
+        self._make(tmp_path, "photo.heic.supplemental.json", b"{}")
+        result = fx._find_all_sidecars(tmp_path / "photo.heic")
+        assert len(result) == 1
+        assert result[0].name == "photo.heic.supplemental.json"
+
     def test_fuzzy_fallback_for_unusual_truncation(self, tmp_path):
         # Sidecar uses a truncation length not in SIDECAR_SUFFIXES
         long_name = "A" * 50 + ".webp"
@@ -131,3 +140,56 @@ class TestRenamedSidecar:
         sc = tmp_path / "photo.png.supplemental-metadata(1).json"
         result = fx._renamed_sidecar(sc, "photo.png", "photo.jpg")
         assert result.name == "photo.jpg.supplemental-metadata(1).json"
+
+
+# ---------------------------------------------------------------------------
+# main() integration
+# ---------------------------------------------------------------------------
+
+
+class TestMainRename:
+    """End-to-end tests for main(): media file AND sidecar must both be renamed."""
+
+    def test_renames_heic_and_supplemental_metadata_sidecar(self, tmp_path):
+        media = tmp_path / "photo.heic"
+        media.write_bytes(JPEG_MAGIC + b"\x00")
+        sidecar = tmp_path / "photo.heic.supplemental-metadata.json"
+        sidecar.write_bytes(b"{}")
+
+        with patch("fix_extensions.PHOTOS_DIR", tmp_path):
+            fx.main()
+
+        assert (tmp_path / "photo.jpg").exists()
+        assert (tmp_path / "photo.jpg.supplemental-metadata.json").exists()
+        assert not media.exists()
+        assert not sidecar.exists()
+
+    def test_renames_heic_and_supplemental_json_sidecar(self, tmp_path):
+        # Regression: .supplemental.json was missing from SIDECAR_SUFFIXES so
+        # the sidecar was never found and the rename left it behind with the old .heic prefix.
+        media = tmp_path / "photo.heic"
+        media.write_bytes(JPEG_MAGIC + b"\x00")
+        sidecar = tmp_path / "photo.heic.supplemental.json"
+        sidecar.write_bytes(b"{}")
+
+        with patch("fix_extensions.PHOTOS_DIR", tmp_path):
+            fx.main()
+
+        assert (tmp_path / "photo.jpg").exists()
+        assert (tmp_path / "photo.jpg.supplemental.json").exists()
+        assert not media.exists()
+        assert not sidecar.exists()
+
+    def test_non_jpeg_heic_is_not_renamed(self, tmp_path):
+        # A real HEIC (not a mislabelled JPEG) must be left alone — media and sidecar untouched
+        media = tmp_path / "photo.heic"
+        media.write_bytes(b"\x00\x00\x00\x18ftyp" + b"\x00" * 40)
+        sidecar = tmp_path / "photo.heic.supplemental.json"
+        sidecar.write_bytes(b"{}")
+
+        with patch("fix_extensions.PHOTOS_DIR", tmp_path):
+            fx.main()
+
+        assert media.exists()
+        assert sidecar.exists()
+        assert not (tmp_path / "photo.jpg").exists()
